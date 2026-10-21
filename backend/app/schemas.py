@@ -7,7 +7,10 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
     name: Optional[str] = None
-    role: str = "STUDENT"  # ADMIN, FACULTY, STUDENT
+    # Accepted for backward compatibility. Public registration resolves this to
+    # STUDENT or FACULTY; privileged/unknown roles become STUDENT. Admins are
+    # created only by app.seed_admin.
+    role: str = "STUDENT"
 
 class UserLogin(BaseModel):
     email: EmailStr

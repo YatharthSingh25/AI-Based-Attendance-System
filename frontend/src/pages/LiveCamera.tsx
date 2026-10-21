@@ -114,13 +114,13 @@ const LiveCamera: React.FC = () => {
 
         {isRunning && videoStream ? (
           <video
-            autoplay
+            autoPlay
             playsInline
             style={{ width: '100%', height: 'auto' }}
           />
         ) : (
           <div className="camera-placeholder">
-            <p>Click "Start Camera" to access webcam</p>
+            <p>Click {"\"Start Camera\""} to access webcam</p>
           </div>
         )}
 

@@ -1,23 +1,108 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 import jwt
 import bcrypt
+from fastapi.middleware.cors import CORSMiddleware
 
-from database import get_db
-from models import User, Student, AttendanceSession, Attendance, FaceEmbedding
-from schemas import UserCreate, UserLogin, StudentCreate, AttendanceCreate
-from services import auth_service
+from app.database import get_db, create_db_and_tables
+from app.models import User, Student, AttendanceSession, Attendance, FaceEmbedding
+from app.schemas import (
+    UserCreate,
+    UserLogin,
+    StudentCreate,
+    AttendanceSessionCreate,
+    MLPredictionResponse,
+)
+from app.core.auth import auth_service, resolve_public_registration_role
+
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Ensure required tables exist before serving requests."""
+    create_db_and_tables()
+    yield
+
 
 app = FastAPI(
     title="AI Attendance System API",
     version="1.0.0",
-    description="Intelligent Classroom Attendance System"
+    description="Intelligent Classroom Attendance System",
+    lifespan=lifespan,
 )
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+# CORS configuration
+# In production, set CORS_ORIGINS environment variable as comma-separated list
+# e.g., "http://localhost:3000,http://my-app.vercel.app"
+import os
+
+def get_cors_origins():
+    """Parse CORS origins from environment variable."""
+    origins_str = os.getenv("CORS_ORIGINS", "")
+    if origins_str:
+        return [o.strip() for o in origins_str.split(",") if o.strip()]
+    return [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+origins = get_cors_origins()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+
+def get_current_user(
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme),
+) -> User:
+    return auth_service.get_current_user(db, token)
+
+
+def require_roles(*allowed_roles: str):
+    """Build a dependency that allows only the listed roles.
+
+    Authentication runs first via ``get_current_user`` (401 when no valid
+    token is present). Authenticated users without an allowed role receive 403.
+    """
+    allowed = frozenset(role.strip().upper() for role in allowed_roles)
+    if not allowed:
+        raise ValueError("require_roles requires at least one role")
+
+    def role_dependency(current_user: User = Depends(get_current_user)) -> User:
+        role = (current_user.role or "").strip().upper()
+        if role not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return current_user
+
+    return role_dependency
+
+
+@app.get("/health", include_in_schema=False)
+async def health():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "service": "AI Attendance System API",
+        "version": "1.0.0"
+    }
 
 @app.post("/api/auth/login", response_model=dict)
 async def login(
@@ -58,7 +143,11 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
-    user = auth_service.create(user_create, db)
+    # Public registration may create STUDENT or FACULTY accounts only.
+    # Privileged/unknown roles (including ADMIN) fall back to STUDENT; ADMIN
+    # accounts are provisioned only through the environment-based seed process.
+    public_role = resolve_public_registration_role(user_create.role)
+    user = auth_service.create(user_create, db, role=public_role)
     return {
         "message": "User registered successfully",
         "user": {
@@ -69,10 +158,10 @@ async def register(
         }
     }
 
-@app.get("/api/students", response_model=List[dict])
+@app.get("/api/students", response_model=None)
 async def get_students(
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Get all students."""
     students = db.query(Student).all()
@@ -94,7 +183,7 @@ async def get_students(
 async def create_student(
     student: StudentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Create a new student."""
     # Check if student_id already exists
@@ -104,7 +193,6 @@ async def create_student(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Student ID already exists"
         )
-    from models import UserRole
     new_student = Student(
         student_id=student.student_id,
         name=student.name,
@@ -135,7 +223,7 @@ async def create_student(
 async def get_student(
     student_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Get a specific student by ID."""
     student = db.query(Student).filter(Student.id == student_id).first()
@@ -160,7 +248,7 @@ async def update_student(
     student_id: str,
     student_update: dict,
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Update student information."""
     student = db.query(Student).filter(Student.id == student_id).first()
@@ -191,7 +279,7 @@ async def update_student(
 async def delete_student(
     student_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Delete a student."""
     student = db.query(Student).filter(Student.id == student_id).first()
@@ -209,7 +297,7 @@ async def enroll_face(
     student_id: str,
     images: list,
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Enroll face images for a student."""
     student = db.query(Student).filter(Student.id == student_id).first()
@@ -220,7 +308,7 @@ async def enroll_face(
         )
     # TODO: Process images and generate face embeddings
     # For now, store placeholder
-    from models import FaceEmbedding
+    from app.models import FaceEmbedding
     embedding = FaceEmbedding(
         student_id=student.id,
         embedding_vector=[],  # Will be populated by AI service
@@ -236,23 +324,22 @@ async def enroll_face(
 
 @app.post("/api/attendance/sessions", response_model=dict)
 async def create_attendance_session(
-    subject: str,
-    section: str,
+    session_data: AttendanceSessionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Create a new attendance session."""
-    from models import AttendanceSession
+    from app.models import AttendanceSession
     # Generate session ID
     session_id = f"session_{datetime.utcnow().timestamp()}"
     new_session = AttendanceSession(
         session_id=session_id,
-        subject=subject,
+        subject=session_data.subject,
         faculty_id=current_user.id,
-        section=section,
+        section=session_data.section,
         date=datetime.utcnow().date(),
-        start_time=datetime.utcnow().time(),
-        end_time=(datetime.utcnow() + timedelta(hours=2)).time()
+        start_time=datetime.utcnow(),
+        end_time=datetime.utcnow() + timedelta(hours=2)
     )
     db.add(new_session)
     db.commit()
@@ -272,7 +359,7 @@ async def create_attendance_session(
 @app.get("/api/attendance/sessions", response_model=List[dict])
 async def get_attendance_sessions(
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Get all attendance sessions."""
     sessions = db.query(AttendanceSession).all()
@@ -293,10 +380,10 @@ async def get_attendance_sessions(
 async def get_attendance_by_session(
     session_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Get attendance records for a specific session."""
-    from models import Attendance
+    from app.models import Attendance
     attendance = db.query(Attendance).filter(Attendance.session_id == session_id).all()
     return [
         {
@@ -313,31 +400,37 @@ async def get_attendance_by_session(
 
 @app.post("/api/attendance/photo", response_model=dict)
 async def attendance_photo(
-    session_id: str,
-    image_data: bytes,
+    session_id: str = Form(...),
+    image_data: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Process classroom photo for attendance."""
     # TODO: Integrate with face detection/recognition service
-    # For now, return placeholder
+    # For now, accept the upload and return a placeholder.
+    contents = await image_data.read()
     return {
         "message": "Photo attendance processing - AI service integration pending",
-        "session_id": session_id
+        "session_id": session_id,
+        "filename": image_data.filename,
+        "size_bytes": len(contents)
     }
 
 @app.post("/api/attendance/live/frame", response_model=dict)
 async def live_frame(
-    session_id: str,
-    frame_data: bytes,
+    session_id: str = Form(...),
+    frame_data: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Process a single frame from live camera for attendance."""
     # TODO: Integrate with face detection/recognition service
+    contents = await frame_data.read()
     return {
         "message": "Live frame processing - AI service integration pending",
-        "session_id": session_id
+        "session_id": session_id,
+        "filename": frame_data.filename,
+        "size_bytes": len(contents)
     }
 
 @app.post("/api/attendance/{attendance_id}/review", response_model=dict)
@@ -345,10 +438,10 @@ async def review_attendance(
     attendance_id: str,
     action: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Teacher review of attendance - confirm, change, or reject."""
-    from models import Attendance
+    from app.models import Attendance
     attendance = db.query(Attendance).filter(Attendance.id == attendance_id).first()
     if not attendance:
         raise HTTPException(
@@ -357,7 +450,7 @@ async def review_attendance(
         )
     
     # Record in audit log
-    from models import AuditLog
+    from app.models import AuditLog
     audit = AuditLog(
         attendance_id=attendance.id,
         action=action,
@@ -394,11 +487,11 @@ async def review_attendance(
 @app.get("/api/analytics/overview", response_model=dict)
 async def analytics_overview(
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Get analytics overview."""
     from sqlalchemy import func
-    from models import Attendance, AttendanceSession
+    from app.models import Attendance, AttendanceSession
     
     # Total sessions
     total_sessions = db.query(AttendanceSession).count()
@@ -414,7 +507,7 @@ async def analytics_overview(
     present_count = result.present or 0
     absent_count = result.absent or 0
     unknown_count = result.unknown or 0
-    percentage = Math.round((present_count / total_attendance) * 100) if total_attendance > 0 else 0
+    percentage = round((present_count / total_attendance) * 100) if total_attendance > 0 else 0
     
     return {
         "total_sessions": total_sessions,
@@ -428,10 +521,10 @@ async def analytics_overview(
 async def analytics_student(
     student_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Get analytics for a specific student."""
-    from models import Attendance, AttendanceSession
+    from app.models import Attendance, AttendanceSession
     
     # Get all attendance records for this student
     records = db.query(Attendance).filter(Attendance.student_id == student_id).all()
@@ -449,7 +542,7 @@ async def analytics_student(
     
     attended = sum(1 for r in records if r.status == 'present')
     missed = sum(1 for r in records if r.status == 'absent')
-    percentage = Math.round((attended / total) * 100)
+    percentage = round((attended / total) * 100)
     
     # Get subjects
     subjects = list(set(r.session.subject for r in records if r.session))
@@ -474,39 +567,42 @@ async def analytics_student(
 @app.post("/api/ml/train", response_model=dict)
 async def ml_train(
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("ADMIN"))
 ):
-    """Train ML model for attendance risk prediction."""
-    from models import Attendance, AttendanceSession
-    from services import ml_service
-    
-    # Get historical attendance data
+    """Report that ML training is unavailable; no model is trained."""
+    from app.models import Attendance, AttendanceSession
+    from app.services.ml.service import MLServices
+
+    # Count historical data so the response can report it truthfully. The
+    # bundled service is not a validated training pipeline (its target labels do
+    # not match attendance statuses), so do not call train() or claim success.
     records = db.query(Attendance, AttendanceSession).join(
         AttendanceSession, Attendance.session_id == AttendanceSession.session_id
     ).all()
-    
-    if len(records) < 10:
-        return {
-            "message": "Insufficient historical data for reliable ML prediction.",
-            "accuracy": 0
-        }
-    
-    # Train model
-    result = ml_service.train(records)
-    
-    return {
-        "message": "ML model trained successfully",
-        "accuracy": result.get("accuracy", 0),
-        "model_type": result.get("model_type", "logistic_regression")
-    }
 
-@app.get("/api/ml/predictions", response_model=List[dict])
+    return JSONResponse(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        content={
+            "status": "not_implemented",
+            "message": (
+                "ML training is not implemented in this build. "
+                "No model was trained and no predictions were generated."
+            ),
+            "training_performed": False,
+            "accuracy": 0,
+            "model_type": None,
+            "data_points": len(records),
+            "service_available": MLServices.training_available(),
+        },
+    )
+
+@app.get("/api/ml/predictions", response_model=List[MLPredictionResponse])
 async def ml_predictions(
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth_service.get_current_user)
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
 ):
     """Get attendance risk predictions."""
-    from models import Student, Attendance
+    from app.models import Student, Attendance
     
     students = db.query(Student).all()
     predictions = []
@@ -518,7 +614,7 @@ async def ml_predictions(
         
         attended = sum(1 for r in records if r.status == 'present')
         total = len(records)
-        percentage = Math.round((attended / total) * 100) if total > 0 else 0
+        percentage = round((attended / total) * 100) if total > 0 else 0
         
         if percentage >= 80:
             risk_level = "LOW"
@@ -535,3 +631,132 @@ async def ml_predictions(
         })
     
     return predictions
+
+
+# === Settings Endpoints ===
+
+@app.get("/api/settings/thresholds", response_model=dict)
+async def get_thresholds(
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
+):
+    """Get current recognition confidence thresholds."""
+    return {
+        "highConfidence": 90,
+        "reviewThreshold": 75,
+        "unknownThreshold": 75,
+        "description": ">= 90% → High confidence, 75-89% → Review, < 75% → Unknown"
+    }
+
+@app.post("/api/settings/thresholds", response_model=dict)
+async def update_thresholds(
+    thresholds: dict,
+    current_user: User = Depends(require_roles("ADMIN"))
+):
+    """Update recognition confidence thresholds.
+
+    In production, this would save to database/config.
+    Currently accepts and acknowledges the update.
+    """
+    high = thresholds.get("highConfidence", 90)
+    review = thresholds.get("reviewThreshold", 75)
+    unknown = thresholds.get("unknownThreshold", 75)
+    # Validate ranges
+    if not (90 <= high <= 100):
+        raise HTTPException(status_code=400, detail="highConfidence must be between 90 and 100")
+    if not (75 <= review <= 99):
+        raise HTTPException(status_code=400, detail="reviewThreshold must be between 75 and 99")
+    if not (0 <= unknown <= 74):
+        raise HTTPException(status_code=400, detail="unknownThreshold must be between 0 and 74")
+    return {
+        "message": "Confidence thresholds updated (demo mode - saved to session)",
+        "highConfidence": high,
+        "reviewThreshold": review,
+        "unknownThreshold": unknown
+    }
+
+@app.get("/api/settings/liveness", response_model=dict)
+async def get_liveness_settings(
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
+):
+    """Get liveness/anti-spoofing configuration."""
+    return {
+        "enabled": True,
+        "spoofThreshold": 0.5,
+        "description": "Liveness is an additional verification layer and is not guaranteed to stop every attack"
+    }
+
+@app.post("/api/settings/liveness", response_model=dict)
+async def update_liveness_settings(
+    settings: dict,
+    current_user: User = Depends(require_roles("ADMIN"))
+):
+    """Update liveness/anti-spoofing configuration.
+
+    In production, this would save to database/config.
+    Currently acknowledges the update with disclaimer.
+    """
+    enabled = settings.get("enabled", True)
+    spoof_threshold = settings.get("spoofThreshold", 0.5)
+    return {
+        "message": "Liveness settings updated (demo mode - saved to session)",
+        "enabled": enabled,
+        "spoofThreshold": spoof_threshold,
+        "disclaimer": "Liveness is an additional verification layer and is not guaranteed to stop every attack"
+    }
+
+@app.get("/api/settings/ml", response_model=dict)
+async def get_ml_settings(
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
+):
+    """Get machine learning attendance risk prediction configuration."""
+    return {
+        "model": "logistic_regression",
+        "autoTrain": False,
+        "description": "Models: Logistic Regression, Random Forest, XGBoost. Features: current_attendance, classes_attended, classes_missed, recent_attendance, consecutive_absences, subject_attendance, attendance_trend. Output: LOW RISK, MEDIUM RISK, HIGH RISK (attendance shortage only)"
+    }
+
+@app.post("/api/settings/ml", response_model=dict)
+async def update_ml_settings(
+    settings: dict,
+    current_user: User = Depends(require_roles("ADMIN"))
+):
+    """Update machine learning attendance risk prediction configuration.
+
+    In production, this would train and save the model.
+    Currently acknowledges the update with explanation of limitations.
+    """
+    model = settings.get("model", "logistic_regression")
+    auto_train = settings.get("autoTrain", False)
+    return {
+        "message": "ML settings updated (demo mode - no model trained without model files)",
+        "model": model,
+        "autoTrain": auto_train,
+        "note": "Model files not present in repository. Real ML prediction requires trained model weights.",
+        "warning": "Insufficient historical data for reliable ML prediction if no model trained"
+    }
+
+@app.post("/api/reports/export", response_model=dict)
+async def export_report(
+    request: dict,
+    current_user: User = Depends(require_roles("FACULTY", "ADMIN"))
+):
+    """Export attendance report in specified format.
+
+    Formats: PDF, CSV, Excel
+
+    In production, this would generate and download a file.
+    Currently returns a description and acknowledges the request.
+    """
+    format_type = request.get("format", "PDF")
+    valid_formats = ["PDF", "CSV", "Excel"]
+    if format_type not in valid_formats:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid format. Must be one of: {', '.join(valid_formats)}"
+        )
+    return {
+        "message": f"Report export requested as {format_type} (demo mode - file generation pending)",
+        "format": format_type,
+        "note": "Report generation requires actual attendance data and file formatting logic.",
+        "disclaimer": "No files are generated in demo mode. Real report export requires backend implementation."
+    }

@@ -1,6 +1,6 @@
 import React from 'react'
 import { Card, Chart } from './ui'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 interface Student {
   id: string
@@ -26,7 +26,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="dashboard-page">
-      <h2>Today's Attendance</h2>
+      <h2>{"Today's Attendance"}</h2>
 
       <div className="stats-grid">
         <div className="stat-card">

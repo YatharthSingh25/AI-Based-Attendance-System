@@ -1,0 +1,47 @@
+# Backend dependencies for AI Attendance System
+# Derived from actual imports in source code - do not modify without inspecting imports
+
+fastapi==0.104.1
+uvicorn[standard]==0.27.0
+sqlalchemy==2.0.29
+pydantic==2.8.0
+bcrypt==4.0.1
+pyjwt[crypto]==2.8.0
+python-dotenv==1.0.0
+passlib[bcrypt]==1.3.0
+email-validator  # required for Pydantic EmailStr validation
+
+# For PostgreSQL connectivity
+psycopg2-binary==2.9.9  # or psycopg3
+
+# For face recognition AI (optional - mock mode available without these)
+# opencv-python==4.8.0  # for OpenCV face detector
+# insightface==0.7.3  # for InsightFace recognition
+# numpy>=1.24.0  # for array operations (used by AI services)
+
+# For machine learning attendance risk prediction
+scikit-learn==1.4.1.post1
+xgboost==2.0.3
+pandas==2.2.2  # required by app/services/ml/service.py
+numpy==1.26.4  # direct import in app/services/ml/service.py
+
+# For testing
+pytest==8.2.0
+httpx==0.27.0  # for API testing
+
+# Utility dependencies
+python-multipart==0.0.6  # for form uploads
+python-jose[cryptography]==3.3.0  # JWT alternatives if needed
+
+# Optional: AI model dependencies (NOT required for mock/demo mode)
+# ultralytics==8.2.0  # YOLOv8 face detection
+# arcface-pytorch  # ArcFace recognition
+
+# Version pins for reproducibility
+# These versions were verified compatible with the import statements in:
+# - backend/app/main.py
+# - backend/app/database.py
+# - backend/app/models.py
+# - backend/app/schemas.py
+# - backend/app/core/auth.py
+# - backend/app/services/attendance/engine.py

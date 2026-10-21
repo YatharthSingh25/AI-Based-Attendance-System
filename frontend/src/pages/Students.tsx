@@ -1,10 +1,11 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Card, Table, Badge } from '../components/ui'
 import Layout from '../layouts/MainLayout'
+import api, { studentApi } from '../services/api'
 
 interface Student {
   id: string
-  studentId: string
+  student_id: string
   name: string
   email: string
   course: string
@@ -18,7 +19,7 @@ const Students: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [mode, setMode] = useState<'view' | 'add' | 'enroll' | 'edit'>('view')
   const [newStudent, setNewStudent] = useState<Partial<Student>>({
-    studentId: '',
+    student_id: '',
     name: '',
     email: '',
     course: '',
@@ -28,15 +29,23 @@ const Students: React.FC = () => {
   })
   const [enrollImages, setEnrollImages] = useState<FileList | null>(null)
 
-  // Sample data - would fetch from API in production
-  const loadStudents = () => {
-    setStudents([
-      { id: '1', studentId: 'CSE001', name: 'Rahul Sharma', email: 'rahul@college.edu', course: 'Data Structures', branch: 'CSE', section: 'A', semester: 3 },
-      { id: '2', studentId: 'CSE002', name: 'Priya Mehta', email: 'priya@college.edu', course: 'DBMS', branch: 'CSE', section: 'A', semester: 3 },
-      { id: '3', studentId: 'CSE003', name: 'Amit Kumar', email: 'amit@college.edu', course: 'DAA', branch: 'CSE', section: 'B', semester: 4 },
-      { id: '4', studentId: 'CSE004', name: 'Sneha Roy', email: 'sneha@college.edu', course: 'OS', branch: 'CSE', section: 'A', semester: 3 },
-    ])
-  }
+  // Fetch students from backend
+  useEffect(() => {
+    const fetchStudents = async () => {
+      setLoading(true)
+      try {
+        const response = await studentApi.getStudents()
+        setStudents(response.data || [])
+      } catch (error) {
+        console.error('Failed to fetch students:', error)
+        // Do not fall back to mock data - show empty list and alert user
+        setStudents([])
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchStudents()
+  }, [])
 
   const handleAddStudent = () => {
     setMode('add')
@@ -46,39 +55,48 @@ const Students: React.FC = () => {
     setMode('enroll')
   }
 
-  const saveStudent = () => {
-    if (!newStudent.name || !newStudent.studentId) return
-    const student: Student = {
-      ...newStudent,
-      id: String(Date.now()),
+  const saveStudent = async () => {
+    if (!newStudent.name || !newStudent.student_id) return
+    try {
+      await studentApi.createStudent({
+        student_id: newStudent.student_id,
+        name: newStudent.name,
+        email: newStudent.email || '',
+        course: newStudent.course || 'Data Structures',
+        branch: newStudent.branch || 'CSE',
+        section: newStudent.section || 'A',
+        semester: newStudent.semester || 1,
+      })
+      // Refresh the list
+      const response = await studentApi.getStudents()
+      setStudents(response.data || [])
+      setMode('view')
+      setNewStudent({
+        student_id: '',
+        name: '',
+        email: '',
+        course: '',
+        branch: '',
+        section: '',
+        semester: 1,
+      })
+    } catch (error) {
+      console.error('Failed to create student:', error)
     }
-    setStudents([...students, student])
-    loadStudents()
-    setMode('view')
-    setNewStudent({
-      studentId: '',
-      name: '',
-      email: '',
-      course: '',
-      branch: '',
-      section: '',
-      semester: 1,
-    })
   }
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     setEnrollImages(e.target.files as FileList)
   }
 
-  const generateEmbedding = () => {
+  const generateEmbedding = async () => {
     if (!enrollImages) return
-    // Would process images and generate face embeddings
-    alert('Face embedding generation - AI service integration pending')
+    // Would process images and generate face embeddings via API
+    // For now, alert the user
+    alert('Face embedding generation - API integration pending')
     setEnrollImages(null)
     setMode('view')
   }
-
-  loadStudents()
 
   return (
     <Layout>
@@ -102,8 +120,8 @@ const Students: React.FC = () => {
                 <input
                   type="text"
                   placeholder="CSE005"
-                  value={newStudent.studentId || ''}
-                  onChange={(e) => setNewStudent({ ...newStudent, studentId: e.target.value })}
+                  value={newStudent.student_id || ''}
+                  onChange={(e) => setNewStudent({ ...newStudent, student_id: e.target.value })}
                   required
                 />
               </div>
@@ -176,7 +194,7 @@ const Students: React.FC = () => {
               <button type="button" className="btn-secondary" onClick={saveStudent}>
                 Save Student
               </button>
-              <button type="button" className="btn-outline" onClick={loadStudents}>
+              <button type="button" className="btn-outline" onClick={() => setMode('view')}>
                 Cancel
               </button>
             </form>
@@ -186,7 +204,7 @@ const Students: React.FC = () => {
         {mode === 'enroll' && (
           <div className="form-section">
             <h3>Enroll Face Images</h3>
-            <p>Student: {newStudent?.name || 'Select student'} ({newStudent?.studentId || ''})</p>
+            <p>Student: {newStudent?.name || 'Select student'} ({newStudent?.student_id || ''})</p>
             <p>Upload 3-5 face images for enrollment</p>
             <input
               type="file"
@@ -208,14 +226,14 @@ const Students: React.FC = () => {
             <Table
               headers={"Roll No.,Student,Course,Branch,Section,Semester,Actions".split(",")}
               rows={students.map((s, i) => [
-                s.studentId,
+                s.student_id,
                 s.name,
                 s.course,
                 s.branch,
                 s.section,
                 s.semester,
                 (
-                  <div>
+                  <div key={s.id}>
                     <button>View</button>
                     <button>Edit</button>
                     <button>Delete</button>

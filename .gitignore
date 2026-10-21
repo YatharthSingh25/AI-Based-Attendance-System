@@ -28,6 +28,10 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 *.log
+build_output.txt
+build_result.txt
+.coverage
+htmlcov/
 
 # Generated model weights and uploaded biometric data
 *.onnx

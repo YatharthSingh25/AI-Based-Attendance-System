@@ -13,6 +13,17 @@ class MLServices:
     Predicts attendance risk (LOW/MEDIUM/HIGH) based on historical attendance data.
     Does NOT predict academic performance - only attendance shortage risk.
     """
+
+    @classmethod
+    def training_available(cls) -> bool:
+        """Return whether a validated training pipeline is available.
+
+        The bundled ``train`` method is an experimental scaffold: it expects
+        LOW/MEDIUM/HIGH risk labels, while stored attendance statuses are
+        present/absent/unknown/review, and its prediction path is a placeholder.
+        It must not be reported as a successful production training pipeline.
+        """
+        return False
     
     def __init__(self):
         """Initialize ML services with available models."""

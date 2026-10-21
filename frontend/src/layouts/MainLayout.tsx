@@ -1,5 +1,6 @@
 import React from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { authApi } from '../services/api'
 
 const Sidebar: React.FC = () => {
   return (
@@ -38,14 +39,24 @@ const Sidebar: React.FC = () => {
 }
 
 const Header: React.FC = () => {
+  const navigate = useNavigate()
+  const user = authApi.getCurrentUser()
+
+  const handleLogout = () => {
+    authApi.logout()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <header className="top-bar">
       <div className="header-left">
         <h1>AI Attendance System</h1>
       </div>
       <div className="header-right">
-        <span className="faculty-name">Faculty</span>
-        <a href="#" className="profile-link">Profile</a>
+        <span className="faculty-name">{user?.name || user?.email || 'Faculty'}</span>
+        <button type="button" className="btn-outline" onClick={handleLogout}>
+          Logout
+        </button>
       </div>
     </header>
   )

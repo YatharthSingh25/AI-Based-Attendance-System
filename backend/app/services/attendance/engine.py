@@ -2,8 +2,8 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session
 
-from models import Attendance, AttendanceSession, Student
-from schemas import ConfidenceThreshold
+from app.models import Attendance, AttendanceSession, Student
+from app.schemas import ConfidenceThreshold
 
 
 class AttendanceEngine:
@@ -51,8 +51,7 @@ class AttendanceEngine:
             Dictionary with attendance decision and details
         """
         # Step 1: Check if student exists
-        from models import Student as StudentModel
-        student = db.query(StudentModel).filter(StudentModel.id == student_id).first()
+        student = db.query(Student).filter(Student.id == student_id).first()
         if not student:
             return {
                 'decision': 'reject',
@@ -98,8 +97,7 @@ class AttendanceEngine:
             }
         
         # Step 5: Mark present
-        from models import Attendance as AttendanceModel
-        new_attendance = AttendanceModel(
+        new_attendance = Attendance(
             student_id=student_id,
             session_id=session_id,
             status='present',
@@ -134,7 +132,6 @@ class AttendanceEngine:
         Returns:
             True if duplicate exists
         """
-        from models import Attendance
         existing = db.query(Attendance).filter(
             Attendance.student_id == student_id,
             Attendance.session_id == session_id

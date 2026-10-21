@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Boolean, Text, ForeignKey, create_engine
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Boolean, Text, ForeignKey, UniqueConstraint, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy import func
@@ -19,7 +19,6 @@ class User(Base):
     # Relationships
     students = relationship("Student", foreign_keys="Student.faculty_id", back_populates="faculty")
     taught_sessions = relationship("AttendanceSession", foreign_keys="AttendanceSession.faculty_id", back_populates="faculty")
-    attendance_records = relationship("Attendance", back_populates="student")
 
 class Student(Base):
     __tablename__ = "students"
@@ -64,7 +63,7 @@ class AttendanceSession(Base):
     end_time = Column(DateTime, nullable=False)
     
     # Relationships
-    faculty = relationship("User", foreign_keys=[faculty_id])
+    faculty = relationship("User", foreign_keys=[faculty_id], back_populates="taught_sessions")
     attendance = relationship("Attendance", back_populates="session")
 
 class Attendance(Base):
