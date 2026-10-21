@@ -1,5 +1,6 @@
+
 import React from 'react'
-import { RouterRoutes } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import TakeAttendance from './pages/TakeAttendance'
@@ -11,25 +12,19 @@ import Reports from './pages/Reports'
 import MLInsights from './pages/MLInsights'
 import Settings from './pages/Settings'
 
-import Layout from './layouts/MainLayout'
-
 export default function App() {
   return (
-    <div>
-      <Layout>
-        <RouterRoutes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/take-attendance" element={<TakeAttendance />} />
-          <Route path="/live-camera" element={<LiveCamera />} />
-          <Route path="/students" element={<Students />} />
-          <Route path="/subjects" element={<Subjects />} />
-          <Route path="/analytics" element={<Analytics />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/ml-insights" element={<MLInsights />} />
-          <Route path="/settings" element={<Settings />} />
-        </RouterRoutes>
-      </Layout>
-    </div>
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/" element={<Dashboard />} />
+      <Route path="/take-attendance" element={<TakeAttendance />} />
+      <Route path="/live-camera" element={<LiveCamera />} />
+      <Route path="/students" element={<Students />} />
+      <Route path="/subjects" element={<Subjects />} />
+      <Route path="/analytics" element={<Analytics />} />
+      <Route path="/reports" element={<Reports />} />
+      <Route path="/ml-insights" element={<MLInsights />} />
+      <Route path="/settings" element={<Settings />} />
+    </Routes>
   )
 }
