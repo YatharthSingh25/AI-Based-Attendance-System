@@ -1,3 +1,818 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Application theme
+   The components use semantic class names (dashboard-page, btn-primary, ...)
+   which Tailwind cannot generate. They are defined here.
+--------------------------------------------------------------------------- */
+
+:root {
+  --bg: #f1f5f9;
+  --surface: #ffffff;
+  --surface-alt: #f8fafc;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #64748b;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-soft: #eef2ff;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --sidebar-bg: #0f172a;
+  --sidebar-text: #cbd5e1;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--text);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: 1.5rem;
+  margin: 0 0 1.25rem;
+}
+
+h3 {
+  font-size: 1.05rem;
+  margin: 0 0 0.75rem;
+}
+
+p {
+  margin: 0 0 0.75rem;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+code {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.85em;
+}
+
+/* ------------------------------- Layout --------------------------------- */
+
+.app-container {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "sidebar header"
+    "sidebar main";
+  min-height: 100vh;
+}
+
+.app-container > main {
+  grid-area: main;
+  padding: 1.75rem 2rem 3rem;
+  min-width: 0;
+}
+
+/* ------------------------------- Sidebar -------------------------------- */
+
+.sidebar {
+  grid-area: sidebar;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  background: var(--sidebar-bg);
+  padding: 1.5rem 1rem;
+  overflow-y: auto;
+}
+
+.sidebar::before {
+  content: "AI Attendance";
+  display: block;
+  padding: 0 0.75rem 1.25rem;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sidebar a {
+  display: block;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  color: var(--sidebar-text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar a:hover {
+  background: #1e293b;
+  color: #fff;
+}
+
+/* ------------------------------- Top bar -------------------------------- */
+
+.top-bar {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 2rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.header-left h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.faculty-name {
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* ------------------------------- Buttons -------------------------------- */
+
+.btn-primary,
+.btn-secondary,
+.btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.btn-secondary {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-color: #c7d2fe;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #e0e7ff;
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--border);
+}
+
+.btn-outline:hover:not(:disabled) {
+  color: var(--text);
+  border-color: #94a3b8;
+  background: var(--surface-alt);
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-outline:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* -------------------------------- Cards --------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.card-header {
+  padding: 0.9rem 1.15rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.card-header:empty {
+  display: none;
+}
+
+.card-body {
+  padding: 1.15rem;
+}
+
+/* -------------------------------- Tables -------------------------------- */
+
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+thead th {
+  padding: 0.7rem 0.9rem;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: #f8fafc;
+}
+
+/* -------------------------------- Badges -------------------------------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* -------------------------------- Forms --------------------------------- */
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+input[type="checkbox"] {
+  width: auto;
+  margin-right: 0.5rem;
+  accent-color: var(--primary);
+}
+
+input[type="file"] {
+  padding: 0.4rem;
+  background: var(--surface-alt);
+  font-size: 0.8rem;
+}
+
+select.select {
+  max-width: 100%;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* -------------------------------- Login --------------------------------- */
+
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+  background: radial-gradient(circle at 20% 20%, #1e293b 0%, #0f172a 55%, #020617 100%);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 2rem;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+}
+
+.login-card h2 {
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.login-card .btn-primary {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.7rem 1rem;
+}
+
+/* ------------------------------ Dashboard ------------------------------- */
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+.stat-card {
+  position: relative;
+  padding: 1.15rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.stat-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--primary);
+}
+
+.stat-card:nth-child(1)::before {
+  background: var(--success);
+}
+
+.stat-card:nth-child(2)::before {
+  background: var(--danger);
+}
+
+.stat-card:nth-child(3)::before {
+  background: var(--warning);
+}
+
+.stat-card:nth-child(4)::before {
+  background: var(--primary);
+}
+
+.stat-value {
+  font-size: 1.85rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.stat-label {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.charts-section {
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+/* ------------------------------- Analytics ------------------------------ */
+
+.overview-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+.subject-analysis,
+.subject-breakdown,
+.low-attendance {
+  margin-top: 1.75rem;
+}
+
+/* ------------------------------- Students ------------------------------- */
+
+.students-container,
+.take-attendance-container,
+.settings-container,
+.live-camera-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.actions,
+.report-actions,
+.camera-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.form-section {
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.form-section form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0 1rem;
+}
+
+.form-section form .form-group {
+  margin-bottom: 0.85rem;
+}
+
+/* ---------------------------- Take attendance --------------------------- */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.15rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.controls label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.controls select {
+  min-width: 260px;
+}
+
+.date {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.mode-card {
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mode-card:hover {
+  border-color: #a5b4fc;
+  box-shadow: var(--shadow);
+}
+
+.mode-card h3 {
+  margin-bottom: 0.35rem;
+}
+
+.mode-card p {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.photo-mode {
+  border-left-color: var(--primary);
+}
+
+.live-mode {
+  border-left-color: var(--success);
+}
+
+.photo-preview,
+.live-interface,
+.attendance-results {
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.photo-preview img {
+  display: block;
+  margin-bottom: 0.9rem;
+  border-radius: 8px;
+}
+
+.camera-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  padding: 1.5rem;
+  background: repeating-linear-gradient(
+    45deg,
+    #0f172a,
+    #0f172a 10px,
+    #1e293b 10px,
+    #1e293b 20px
+  );
+  border-radius: var(--radius);
+  color: #cbd5e1;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.camera-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--sidebar-bg);
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.camera-header > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  background: var(--danger);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+}
+
+.fps-counter,
+.faces-counter {
+  color: #cbd5e1;
+}
+
+.faces-counter {
+  margin-left: auto;
+}
+
+.tracking-results {
+  min-height: 0;
+}
+
+.faces-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.face-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.face-name {
+  font-weight: 600;
+}
+
+.track-id {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* ------------------------------- ML insights ---------------------------- */
+
+.student-risk-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+.risk-card {
+  padding: 1rem 1.1rem;
+}
+
+.risk-info {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.student-name {
+  font-weight: 600;
+}
+
+.overall-percentage {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.at-risk {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.ml-methods {
+  margin-top: 1.75rem;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.ml-methods ul {
+  margin: 0 0 0.75rem;
+  padding-left: 1.25rem;
+  list-style: disc;
+  color: var(--muted);
+}
+
+.ml-methods li {
+  margin-bottom: 0.3rem;
+}
+
+/* -------------------------------- Settings ------------------------------ */
+
+.settings-container .card + .card {
+  margin-top: 0;
+}
+
+.settings-container table {
+  margin-bottom: 1rem;
+}
+
+.settings-container input[type="number"] {
+  max-width: 100px;
+  margin-right: 0.5rem;
+}
+
+.settings-container select {
+  max-width: 260px;
+  margin-bottom: 0.85rem;
+}
+
+.settings-container label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* ------------------------------ Responsive ------------------------------ */
+
+@media (max-width: 860px) {
+  .app-container {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "header"
+      "sidebar"
+      "main";
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    padding: 0.75rem;
+  }
+
+  .sidebar::before {
+    padding: 0.25rem 0.75rem 0.75rem;
+  }
+
+  .sidebar ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .sidebar a {
+    padding: 0.45rem 0.65rem;
+    font-size: 0.82rem;
+  }
+
+  .top-bar {
+    padding: 0.75rem 1rem;
+  }
+
+  .app-container > main {
+    padding: 1.25rem 1rem 2.5rem;
+  }
+
+  .date {
+    margin-left: 0;
+  }
+}

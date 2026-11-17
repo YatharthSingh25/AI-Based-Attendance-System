@@ -35,7 +35,26 @@ const Reports: React.FC = () => {
         <h3>Daily Attendance</h3>
         <Table
           headers={"Roll No.,Student,Status,Confidence,Method,Time,Verification".split(",")}
-          rows={attendanceData}
+          rows={attendanceData.map((row) => [
+            row.roll,
+            row.student,
+            <Badge
+              key={row.roll}
+              variant={
+                row.status === 'present'
+                  ? 'success'
+                  : row.status === 'review'
+                    ? 'warning'
+                    : 'danger'
+              }
+            >
+              {row.status}
+            </Badge>,
+            row.confidence,
+            row.method,
+            row.time,
+            row.verification,
+          ])}
         />
       </Card>
 

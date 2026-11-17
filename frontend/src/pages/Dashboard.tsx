@@ -1,6 +1,6 @@
 import React from 'react'
-import { Card, Chart } from './ui'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import Layout from '../layouts/MainLayout'
 
 interface Student {
   id: string
@@ -24,42 +24,50 @@ const Dashboard: React.FC = () => {
   const unknown = students.filter(s => s.status === 'unknown').length
   const percentage = Math.round((present / total) * 100)
 
+  const distribution = [
+    { name: 'Present', count: present },
+    { name: 'Absent', count: absent },
+    { name: 'Unknown', count: unknown },
+  ]
+
   return (
-    <div className="dashboard-page">
-      <h2>{"Today's Attendance"}</h2>
+    <Layout>
+      <div className="dashboard-page">
+        <h2>{"Today's Attendance"}</h2>
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-value">{present}</div>
-          <div className="stat-label">Present</div>
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-value">{present}</div>
+            <div className="stat-label">Present</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value">{absent}</div>
+            <div className="stat-label">Absent</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value">{unknown}</div>
+            <div className="stat-label">Unknown</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value">{percentage}%</div>
+            <div className="stat-label">Overall Attendance</div>
+          </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-value">{absent}</div>
-          <div className="stat-label">Absent</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">{unknown}</div>
-          <div className="stat-label">Unknown</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">{percentage}%</div>
-          <div className="stat-label">Overall Attendance</div>
+
+        <div className="charts-section">
+          <h3>Attendance Distribution</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={distribution}>
+              <XAxis dataKey="name" />
+              <YAxis allowDecimals={false} />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="count" name="Students" fill="#4f46e5" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
-
-      <div className="charts-section">
-        <h3>Attendance Distribution</h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={students}>
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Bar dataKey="status" backgroundColor="#8884d8" />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+    </Layout>
   )
 }
 
