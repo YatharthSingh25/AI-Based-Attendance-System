@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, F
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
 from datetime import datetime, timedelta
 import jwt
@@ -95,6 +96,54 @@ def require_roles(*allowed_roles: str):
     return role_dependency
 
 
+# Login tabs. The tab the user picks must match the account's real role.
+# "scope" is a standard OAuth2 password-form field, so the frontend sends the
+# chosen tab as scope=teacher or scope=student.
+LOGIN_ROLE_SCOPES = {
+    "teacher": frozenset({"FACULTY", "ADMIN"}),
+    "student": frozenset({"STUDENT"}),
+}
+
+
+def enforce_login_scope(scopes, role: Optional[str]) -> None:
+    """Reject a sign-in that used the wrong login tab.
+
+    ``scopes`` is the parsed OAuth2 ``scope`` form field: FastAPI exposes it as
+    a list of strings (``form_data.scopes``). An empty or unrecognised value
+    keeps the previous behaviour, so clients that send no scope still work.
+    """
+    if not scopes:
+        return
+
+    if isinstance(scopes, str):
+        candidates = scopes.split()
+    else:
+        candidates = [str(value) for value in scopes]
+
+    requested = None
+    for value in candidates:
+        candidate = value.strip().lower()
+        if candidate in LOGIN_ROLE_SCOPES:
+            requested = candidate
+            break
+
+    if requested is None:
+        return
+
+    allowed = LOGIN_ROLE_SCOPES[requested]
+    actual = (role or "").strip().upper()
+    if actual in allowed:
+        return
+
+    expected_tab = "Student" if requested == "student" else "Teacher"
+    actual_tab = "student" if actual == "STUDENT" else "teacher"
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=f"This is a {actual_tab} account. Please use the {expected_tab} login tab.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 @app.get("/health", include_in_schema=False)
 async def health():
     """Health check endpoint."""
@@ -117,6 +166,10 @@ async def login(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # The teacher/student login tabs are enforced against the stored role.
+    enforce_login_scope(form_data.scopes, user.role)
+
     access_token = auth_service.create_access_token(
         data={"sub": str(user.id)}
     )
@@ -157,6 +210,158 @@ async def register(
             "name": user.name
         }
     }
+
+
+def get_linked_student(db: Session, current_user: User) -> Optional[Student]:
+    """Return the student row that belongs to the signed-in account.
+
+    Accounts are linked to student records by email address, which avoids a
+    schema change on databases that already exist in production.
+    """
+    email = (current_user.email or "").strip().lower()
+    if not email:
+        return None
+    return db.query(Student).filter(func.lower(Student.email) == email).first()
+
+
+def build_attendance_summary(records: List[Attendance]) -> dict:
+    """Summarise one student's attendance records for the student view."""
+    counts = {"present": 0, "absent": 0, "review": 0, "unknown": 0}
+    subjects: dict = {}
+
+    for record in records:
+        status_value = (record.status or "").strip().lower()
+        if status_value in counts:
+            counts[status_value] += 1
+
+        session_row = record.session
+        subject = session_row.subject if session_row else "Unknown"
+        entry = subjects.setdefault(
+            subject,
+            {"subject": subject, "present": 0, "absent": 0, "total": 0},
+        )
+        entry["total"] += 1
+        if status_value == "present":
+            entry["present"] += 1
+        elif status_value == "absent":
+            entry["absent"] += 1
+
+    marked = counts["present"] + counts["absent"]
+    percentage = round((counts["present"] / marked) * 100, 1) if marked else 0.0
+
+    return {
+        "total_sessions": len(records),
+        "present": counts["present"],
+        "absent": counts["absent"],
+        "review": counts["review"],
+        "unknown": counts["unknown"],
+        "attendance_percentage": percentage,
+        "subjects": [
+            {
+                **entry,
+                "percentage": (
+                    round((entry["present"] / entry["total"]) * 100, 1)
+                    if entry["total"]
+                    else 0.0
+                ),
+            }
+            for entry in sorted(subjects.values(), key=lambda item: item["subject"])
+        ],
+    }
+
+
+@app.get("/api/me", response_model=dict)
+async def get_me(current_user: User = Depends(get_current_user)):
+    """Return the signed-in account, so the UI can restore its role."""
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "role": current_user.role,
+        "name": current_user.name,
+    }
+
+
+@app.get("/api/me/student", response_model=dict)
+async def get_my_student(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Profile and attendance summary for the signed-in student."""
+    student = get_linked_student(db, current_user)
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "No student record is linked to this account. "
+                "Ask a teacher to add you using this email address."
+            ),
+        )
+
+    records = (
+        db.query(Attendance)
+        .filter(Attendance.student_id == student.id)
+        .order_by(Attendance.timestamp.desc())
+        .all()
+    )
+
+    return {
+        "student": {
+            "id": str(student.id),
+            "student_id": student.student_id,
+            "name": student.name,
+            "email": student.email,
+            "course": student.course,
+            "branch": student.branch,
+            "section": student.section,
+            "semester": student.semester,
+        },
+        "summary": build_attendance_summary(records),
+    }
+
+
+@app.get("/api/me/attendance", response_model=List[dict])
+async def get_my_attendance(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Attendance history for the signed-in student only."""
+    student = get_linked_student(db, current_user)
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "No student record is linked to this account. "
+                "Ask a teacher to add you using this email address."
+            ),
+        )
+
+    records = (
+        db.query(Attendance)
+        .filter(Attendance.student_id == student.id)
+        .order_by(Attendance.timestamp.desc())
+        .all()
+    )
+
+    return [
+        {
+            "id": record.id,
+            "session_id": record.session_id,
+            "subject": record.session.subject if record.session else None,
+            "section": record.session.section if record.session else None,
+            "date": (
+                record.session.date.isoformat()
+                if record.session and record.session.date
+                else None
+            ),
+            "status": record.status,
+            "confidence": record.confidence,
+            "method": record.method,
+            "verified": record.verified,
+            "timestamp": record.timestamp.isoformat() if record.timestamp else None,
+        }
+        for record in records
+    ]
+
 
 @app.get("/api/students", response_model=None)
 async def get_students(

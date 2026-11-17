@@ -5,6 +5,13 @@ import axios from "axios"
 // e.g., https://your-backend-service.onrender.com
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"
 
+export type LoginTab = "teacher" | "student"
+
+export const isTeacherRole = (role?: string | null): boolean => {
+  const value = (role || "").toUpperCase()
+  return value === "FACULTY" || value === "ADMIN"
+}
+
 // Create axios instance with base URL and default headers
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -32,12 +39,15 @@ api.interceptors.request.use(
 
 // Auth APIs
 export const authApi = {
-  login: (email: string, password: string) => {
+  login: (email: string, password: string, tab: LoginTab = "teacher") => {
     // Backend uses OAuth2PasswordRequestForm: form-encoded username/password.
     // The server authenticates by email, so the email maps to "username".
+    // "scope" carries the chosen login tab; the backend rejects a tab that
+    // does not match the account's real role.
     const form = new URLSearchParams()
     form.append("username", email)
     form.append("password", password)
+    form.append("scope", tab)
     return api.post("/api/auth/login", form, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     })
@@ -55,7 +65,13 @@ export const authApi = {
     // For now, return user from localStorage
     if (typeof window !== "undefined") {
       const user = localStorage.getItem("user")
-      return user ? JSON.parse(user) : null
+      if (!user) return null
+      try {
+        return JSON.parse(user)
+      } catch {
+        localStorage.removeItem("user")
+        return null
+      }
     }
     return null
   },
@@ -70,6 +86,15 @@ export const authApi = {
       localStorage.removeItem("user")
     }
   },
+}
+
+// Student self-service APIs - always scoped to the signed-in account
+export const meApi = {
+  getMe: () => api.get("/api/me"),
+
+  getMyStudent: () => api.get("/api/me/student"),
+
+  getMyAttendance: () => api.get("/api/me/attendance"),
 }
 
 // Student APIs

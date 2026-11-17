@@ -1,38 +1,32 @@
 import React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { authApi } from '../services/api'
+import { authApi, isTeacherRole } from '../services/api'
 
-const Sidebar: React.FC = () => {
+const TEACHER_LINKS = [
+  { to: '/', label: 'Dashboard' },
+  { to: '/take-attendance', label: 'Take Attendance' },
+  { to: '/live-camera', label: 'Live Camera' },
+  { to: '/students', label: 'Students' },
+  { to: '/subjects', label: 'Subjects' },
+  { to: '/analytics', label: 'Analytics' },
+  { to: '/reports', label: 'Reports' },
+  { to: '/ml-insights', label: 'ML Insights' },
+  { to: '/settings', label: 'Settings' },
+]
+
+const STUDENT_LINKS = [{ to: '/my-attendance', label: 'My Attendance' }]
+
+const Sidebar: React.FC<{ teacher: boolean }> = ({ teacher }) => {
+  const links = teacher ? TEACHER_LINKS : STUDENT_LINKS
+
   return (
-    <nav className="sidebar">
+    <nav className="sidebar" aria-label="Main navigation">
       <ul>
-        <li>
-          <Link to="/">Dashboard</Link>
-        </li>
-        <li>
-          <Link to="/take-attendance">Take Attendance</Link>
-        </li>
-        <li>
-          <Link to="/live-camera">Live Camera</Link>
-        </li>
-        <li>
-          <Link to="/students">Students</Link>
-        </li>
-        <li>
-          <Link to="/subjects">Subjects</Link>
-        </li>
-        <li>
-          <Link to="/analytics">Analytics</Link>
-        </li>
-        <li>
-          <Link to="/reports">Reports</Link>
-        </li>
-        <li>
-          <Link to="/ml-insights">ML Insights</Link>
-        </li>
-        <li>
-          <Link to="/settings">Settings</Link>
-        </li>
+        {links.map((link) => (
+          <li key={link.to}>
+            <Link to={link.to}>{link.label}</Link>
+          </li>
+        ))}
       </ul>
     </nav>
   )
@@ -53,7 +47,8 @@ const Header: React.FC = () => {
         <h1>AI Attendance System</h1>
       </div>
       <div className="header-right">
-        <span className="faculty-name">{user?.name || user?.email || 'Faculty'}</span>
+        <span className="faculty-name">{user?.name || user?.email || 'User'}</span>
+        <span className="role-pill">{isTeacherRole(user?.role) ? 'Teacher' : 'Student'}</span>
         <button type="button" className="btn-outline" onClick={handleLogout}>
           Logout
         </button>
@@ -63,9 +58,11 @@ const Header: React.FC = () => {
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
+  const user = authApi.getCurrentUser()
+
   return (
     <div className="app-container">
-      <Sidebar />
+      <Sidebar teacher={isTeacherRole(user?.role)} />
       <Header />
       <main>{children}</main>
     </div>

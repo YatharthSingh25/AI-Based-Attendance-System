@@ -7,6 +7,7 @@ unique schema, so existing schemas and data are never dropped or modified.
 
 import os
 import uuid
+from datetime import date, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.auth import auth_service
 from app.database import get_db, normalize_database_url
 from app.main import app, get_current_user
-from app.models import Attendance, Base, User
+from app.models import Attendance, AttendanceSession, Base, Student, User
 
 # Isolated test database - never points at production data.
 # Override with TEST_DATABASE_URL to run against a dedicated Postgres test DB.
@@ -778,6 +779,200 @@ class TestMLEndpoints:
         assert body["model_type"] is None
         assert body["service_available"] is False
         assert "trained successfully" not in body["message"].lower()
+
+
+class TestLoginRoleTabs:
+    """The teacher/student login tabs must match the account's real role."""
+
+    @staticmethod
+    def _register(auth_client, role):
+        email = f"tabs-{role.lower()}-{uuid.uuid4().hex[:8]}@college.edu"
+        response = auth_client.post(
+            "/api/auth/register",
+            json={
+                "email": email,
+                "password": "Secret123!",
+                "name": f"{role.title()} Tab User",
+                "role": role,
+            },
+        )
+        assert response.status_code == 200, response.text
+        return email
+
+    @staticmethod
+    def _login(auth_client, email, scope=None):
+        data = {"username": email, "password": "Secret123!"}
+        if scope is not None:
+            data["scope"] = scope
+        return auth_client.post("/api/auth/login", data=data)
+
+    def test_teacher_tab_accepts_faculty(self, auth_client):
+        email = self._register(auth_client, "FACULTY")
+        response = self._login(auth_client, email, "teacher")
+        assert response.status_code == 200, response.text
+        assert response.json()["user"]["role"] == "FACULTY"
+
+    def test_student_tab_accepts_student(self, auth_client):
+        email = self._register(auth_client, "STUDENT")
+        response = self._login(auth_client, email, "student")
+        assert response.status_code == 200, response.text
+        assert response.json()["user"]["role"] == "STUDENT"
+
+    def test_teacher_tab_rejects_student_account(self, auth_client):
+        email = self._register(auth_client, "STUDENT")
+        response = self._login(auth_client, email, "teacher")
+        assert response.status_code == 401, response.text
+        body = response.json()
+        assert "student account" in body["detail"].lower()
+        assert "access_token" not in body
+
+    def test_student_tab_rejects_teacher_account(self, auth_client):
+        email = self._register(auth_client, "FACULTY")
+        response = self._login(auth_client, email, "student")
+        assert response.status_code == 401, response.text
+        assert "teacher account" in response.json()["detail"].lower()
+
+    def test_login_without_scope_still_succeeds(self, auth_client):
+        email = self._register(auth_client, "STUDENT")
+        assert self._login(auth_client, email).status_code == 200
+
+
+class TestStudentSelfAccess:
+    """A student may read their own record and attendance, and nothing else."""
+
+    @staticmethod
+    def _register_student(auth_client):
+        email = f"self-{uuid.uuid4().hex[:8]}@college.edu"
+        response = auth_client.post(
+            "/api/auth/register",
+            json={
+                "email": email,
+                "password": "Secret123!",
+                "name": "Self Student",
+                "role": "STUDENT",
+            },
+        )
+        assert response.status_code == 200, response.text
+        return email
+
+    @staticmethod
+    def _student_headers(auth_client, email):
+        response = auth_client.post(
+            "/api/auth/login",
+            data={"username": email, "password": "Secret123!", "scope": "student"},
+        )
+        assert response.status_code == 200, response.text
+        token = response.json()["access_token"]
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_me_returns_own_role(self, auth_client):
+        email = self._register_student(auth_client)
+        headers = self._student_headers(auth_client, email)
+
+        response = auth_client.get("/api/me", headers=headers)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["email"] == email
+        assert body["role"] == "STUDENT"
+
+    def test_student_cannot_list_students(self, auth_client):
+        email = self._register_student(auth_client)
+        headers = self._student_headers(auth_client, email)
+        assert auth_client.get("/api/students", headers=headers).status_code == 403
+
+    def test_unlinked_account_gets_404(self, auth_client):
+        email = self._register_student(auth_client)
+        headers = self._student_headers(auth_client, email)
+
+        response = auth_client.get("/api/me/student", headers=headers)
+        assert response.status_code == 404, response.text
+        assert "no student record" in response.json()["detail"].lower()
+
+    def test_linked_student_sees_only_own_attendance(self, auth_client, db_session):
+        email = self._register_student(auth_client)
+        headers = self._student_headers(auth_client, email)
+
+        faculty = User(
+            email=f"fac-{uuid.uuid4().hex[:8]}@test.local",
+            password_hash=auth_service.hash_password("Secret123!"),
+            role="FACULTY",
+            name="Faculty One",
+        )
+        db_session.add(faculty)
+        db_session.commit()
+        db_session.refresh(faculty)
+
+        student = Student(
+            student_id=f"SLF{uuid.uuid4().hex[:8].upper()}",
+            name="Self Student",
+            email=email,
+            course="Data Structures",
+            branch="CSE",
+            section="A",
+            semester=4,
+        )
+        other = Student(
+            student_id=f"OTH{uuid.uuid4().hex[:8].upper()}",
+            name="Other Student",
+            email=f"other-{uuid.uuid4().hex[:8]}@college.edu",
+            course="Data Structures",
+            branch="CSE",
+            section="A",
+            semester=4,
+        )
+        db_session.add_all([student, other])
+        db_session.commit()
+        db_session.refresh(student)
+        db_session.refresh(other)
+
+        session_row = AttendanceSession(
+            session_id=f"session_{uuid.uuid4().hex[:10]}",
+            subject="Data Structures",
+            faculty_id=faculty.id,
+            section="A",
+            date=date.today(),
+            start_time=datetime.utcnow(),
+            end_time=datetime.utcnow(),
+        )
+        db_session.add(session_row)
+        db_session.commit()
+
+        db_session.add_all([
+            Attendance(
+                student_id=student.id,
+                session_id=session_row.session_id,
+                status="present",
+                confidence=96.0,
+                method="photo",
+                verified=True,
+            ),
+            Attendance(
+                student_id=other.id,
+                session_id=session_row.session_id,
+                status="absent",
+                confidence=None,
+                method="photo",
+                verified=False,
+            ),
+        ])
+        db_session.commit()
+
+        profile = auth_client.get("/api/me/student", headers=headers)
+        assert profile.status_code == 200, profile.text
+        body = profile.json()
+        assert body["student"]["student_id"] == student.student_id
+        assert body["summary"]["total_sessions"] == 1
+        assert body["summary"]["present"] == 1
+        assert body["summary"]["absent"] == 0
+        assert body["summary"]["attendance_percentage"] == 100.0
+        assert body["summary"]["subjects"][0]["subject"] == "Data Structures"
+
+        history = auth_client.get("/api/me/attendance", headers=headers)
+        assert history.status_code == 200, history.text
+        rows = history.json()
+        assert len(rows) == 1
+        assert rows[0]["status"] == "present"
+        assert rows[0]["subject"] == "Data Structures"
 
 
 if __name__ == "__main__":
