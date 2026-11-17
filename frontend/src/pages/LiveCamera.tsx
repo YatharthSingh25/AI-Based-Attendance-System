@@ -1,153 +1,216 @@
-import React, { useState, useEffect } from 'react'
-import { Card, Badge } from '../components/ui'
+import React, { useEffect, useRef, useState } from 'react'
+import { Card, Table } from '../components/ui'
 import Layout from '../layouts/MainLayout'
+import { attendanceApi } from '../services/api'
 
-interface DetectedFace {
+interface Session {
+  id: string
+  subject: string
+  section: string
+  date?: string
+}
+
+interface MarkedStudent {
+  student_id: string
   name: string
   confidence: number
-  status: 'present' | 'review' | 'unknown'
-  trackId: string
+}
+
+interface RecognitionResult {
+  message: string
+  faces_detected: number
+  marked_present: MarkedStudent[]
+  already_marked: { student_id: string; name: string; status: string }[]
+  unknown_faces: number
+}
+
+const errorMessage = (error: any, fallback: string): string => {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (detail) return JSON.stringify(detail)
+  return error?.message ? `${fallback} (${error.message})` : fallback
 }
 
 const LiveCamera: React.FC = () => {
-  const [videoStream, setVideoStream] = useState<MediaStream | null>(null)
-  const [fps, setFps] = useState(0)
-  const [facesDetected, setFacesDetected] = useState(0)
-  const [recognized, setRecognized] = useState(0)
-  const [unknown, setUnknown] = useState(0)
-  const [trackedFaces, setTrackedFaces] = useState<DetectedFace[]>([])
-  const [isRunning, setIsRunning] = useState(false)
-  let frameTimeout: NodeJS.Timeout | null = null
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
 
-  const subjects = ['Data Structures', 'Database Management', 'Computer Networks']
-  const sections = ['CSE-A', 'CSE-B', 'IT-A']
+  const [running, setRunning] = useState(false)
+  const [cameraError, setCameraError] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [sessionId, setSessionId] = useState('')
+  const [capturing, setCapturing] = useState(false)
+  const [result, setResult] = useState<RecognitionResult | null>(null)
+  const [captureError, setCaptureError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const response = await attendanceApi.getSessions()
+        const list: Session[] = Array.isArray(response.data) ? response.data : []
+        setSessions(list)
+        setSessionId((current) =>
+          list.some((s) => s.id === current) ? current : (list[0]?.id || '')
+        )
+      } catch (error: any) {
+        setCaptureError(errorMessage(error, 'Could not load attendance sessions.'))
+      }
+    }
+    load()
+
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+    }
+  }, [])
 
   const startCamera = async () => {
+    setCameraError(null)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: 1280, height: 720 }
+        video: { width: 1280, height: 720 },
       })
-      setVideoStream(stream)
-      setIsRunning(true)
-      startFaceDetectionLoop()
-    } catch (err) {
-      console.error('Camera access denied or failed:', err)
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
+      setRunning(true)
+    } catch {
+      setCameraError(
+        'Camera access was blocked. Allow camera permission in the browser and try again.'
+      )
     }
   }
 
   const stopCamera = () => {
-    setIsRunning(false)
-    if (videoStream) {
-      videoStream.getTracks().forEach(track => track.stop())
-      setVideoStream(null)
-    }
-    if (frameTimeout) {
-      clearTimeout(frameTimeout)
-      frameTimeout = null
-    }
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    if (videoRef.current) videoRef.current.srcObject = null
+    setRunning(false)
   }
 
-  const startFaceDetectionLoop = () => {
-    if (!isRunning || !videoStream) return
-
-    // Process frame for face detection
-    const videoElement = document.querySelector('video') as HTMLVideoElement
-    if (videoElement) {
-      const canvas = document.createElement('canvas')
-      canvas.width = videoElement.videoWidth
-      canvas.height = videoElement.videoHeight
-      const ctx = canvas.getContext('2d')!
-      ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
-
-      // Mock face detection - in production would use a real detector
-      const detections = mockFaceDetection(canvas)
-
-      setFacesDetected(detections.length)
-      setRecognized(detections.filter(f => f.status === 'present').length)
-      setUnknown(detections.filter(f => f.status === 'unknown').length)
-
-      setTrackedFaces(detections)
+  const captureAndMark = async () => {
+    const video = videoRef.current
+    if (!video) return
+    if (!sessionId) {
+      setCaptureError('Select an attendance session first.')
+      return
     }
 
-    frameTimeout = setTimeout(startFaceDetectionLoop, 1000 / 24) // ~24 FPS
-  }
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const context = canvas.getContext('2d')
+    if (!context) return
+    context.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-  const mockFaceDetection = (canvas: HTMLCanvasElement): DetectedFace[] => {
-    const faces: DetectedFace[] = []
-    const ctx = canvas.getContext('2d')!
-    const data = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    // Generate mock faces for demonstration
-    const numFaces = Math.min(3, 1 + Math.floor(Math.random() * 3))
-
-    for (let i = 0; i < numFaces; i++) {
-      const confidence = Math.round(80 + Math.random() * 20)
-      const status = confidence >= 85 ? 'present' : confidence >= 70 ? 'review' : 'unknown'
-      const trackId = `track_${i + 1}`
-
-      faces.push({
-        name: `Student ${i + 1}`,
-        confidence,
-        status,
-        trackId,
-      })
+    setCaptureError(null)
+    setCapturing(true)
+    try {
+      const blob: Blob | null = await new Promise((resolve) =>
+        canvas.toBlob((value) => resolve(value), 'image/jpeg', 0.9)
+      )
+      if (!blob) {
+        setCaptureError('Could not read a frame from the camera.')
+        return
+      }
+      const response = await attendanceApi.liveFrame(sessionId, blob)
+      setResult(response.data as RecognitionResult)
+    } catch (error: any) {
+      setCaptureError(errorMessage(error, 'Could not process this frame.'))
+    } finally {
+      setCapturing(false)
     }
-
-    return faces
-  }
-
-  const handleAttendance = (face: DetectedFace) => {
-    // Would call API to mark attendance
-    console.log(`Marking attendance for ${face.name} (${face.confidence}%)`)
   }
 
   return (
     <Layout>
       <h2>Live Camera Attendance</h2>
       <div className="live-camera-container">
-        <div className="camera-header">
-          <span>LIVE</span>
-          <div className="fps-counter">FPS: {fps}</div>
-          <div className="faces-counter">
-            Faces Detected: {facesDetected} | Recognized: {recognized} | Unknown: {unknown}
-          </div>
+        <div className="controls">
+          <label>
+            Attendance Session{' '}
+            <select
+              className="select"
+              value={sessionId}
+              onChange={(e) => setSessionId(e.target.value)}
+              disabled={sessions.length === 0}
+            >
+              {sessions.length === 0 && <option value="">No sessions available</option>}
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.subject} - Section {session.section} - {session.date || session.id}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
-        {isRunning && videoStream ? (
-          <video
-            autoPlay
-            playsInline
-            style={{ width: '100%', height: 'auto' }}
-          />
-        ) : (
-          <div className="camera-placeholder">
-            <p>Click {"\"Start Camera\""} to access webcam</p>
-          </div>
+        {sessions.length === 0 && (
+          <p className="form-warning">
+            No attendance sessions exist yet. Create one before using the camera.
+          </p>
         )}
 
-        <div className="tracking-results">
-          {trackedFaces.length > 0 && (
-            <div className="faces-list">
-              {trackedFaces.map((face, i) => (
-                <div key={i} className="face-item">
-                  <span className="face-name">{face.name}</span>
-                  <Badge variant={face.confidence >= 85 ? 'success' : face.confidence >= 70 ? 'warning' : 'danger'}>
-                    {face.confidence}%
-                  </Badge>
-                  <span className="track-id">Track: {face.trackId}</span>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="camera-placeholder">
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            style={{ width: '100%', display: running ? 'block' : 'none' }}
+          />
+          {!running && <p>Start the camera, then capture a frame to mark attendance.</p>}
         </div>
 
+        {cameraError && <p className="form-error">{cameraError}</p>}
+        {captureError && <p className="form-error">{captureError}</p>}
+
         <div className="camera-controls">
-          <button onClick={startCamera} className="btn-primary" disabled={isRunning}>
-            {isRunning ? 'Stop Camera' : 'Start Camera'}
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={startCamera}
+            disabled={running}
+          >
+            Start Camera
           </button>
-          <button onClick={stopCamera} className="btn-secondary" disabled={!isRunning}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={stopCamera}
+            disabled={!running}
+          >
             Stop
           </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={captureAndMark}
+            disabled={!running || capturing || !sessionId}
+          >
+            {capturing ? 'Recognising...' : 'Capture & Mark Attendance'}
+          </button>
         </div>
+
+        {result && (
+          <Card title="Last capture">
+            <p>{result.message}</p>
+            <p>
+              Faces detected: {result.faces_detected} · Marked present:{' '}
+              {result.marked_present.length} · Unknown: {result.unknown_faces}
+            </p>
+            {result.marked_present.length > 0 && (
+              <Table
+                headers={['Roll No.', 'Student', 'Confidence']}
+                rows={result.marked_present.map((student) => [
+                  student.student_id,
+                  student.name,
+                  `${student.confidence}%`,
+                ])}
+              />
+            )}
+          </Card>
+        )}
       </div>
     </Layout>
   )

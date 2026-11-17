@@ -12,9 +12,10 @@ interface Student {
   branch: string
   section: string
   semester: number
+  face_enrolled?: boolean
 }
 
-type Mode = 'view' | 'form'
+type Mode = 'view' | 'form' | 'enroll'
 
 const EMPTY_FORM: Partial<Student> = {
   student_id: '',
@@ -54,6 +55,13 @@ const Students: React.FC = () => {
   const [notice, setNotice] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [listError, setListError] = useState<string | null>(null)
+
+  const [enrollStudent, setEnrollStudent] = useState<Student | null>(null)
+  const [enrollFiles, setEnrollFiles] = useState<File[]>([])
+  const [enrolling, setEnrolling] = useState(false)
+  const [enrollMessage, setEnrollMessage] = useState<string | null>(null)
+  const [enrollError, setEnrollError] = useState<string | null>(null)
+  const [enrollSkipped, setEnrollSkipped] = useState<string[]>([])
 
   const loadStudents = async () => {
     setLoading(true)
@@ -178,6 +186,54 @@ const Students: React.FC = () => {
   const update = (field: keyof Student, value: string | number) =>
     setForm((current) => ({ ...current, [field]: value }))
 
+  const openEnroll = (student: Student) => {
+    setEnrollStudent(student)
+    setEnrollFiles([])
+    setEnrollMessage(null)
+    setEnrollError(null)
+    setEnrollSkipped([])
+    setMode('enroll')
+  }
+
+  const closeEnroll = () => {
+    setMode('view')
+    setEnrollStudent(null)
+    setEnrollFiles([])
+    setEnrollMessage(null)
+    setEnrollError(null)
+    setEnrollSkipped([])
+  }
+
+  const saveEnrollment = async () => {
+    if (!enrollStudent) return
+    if (enrollFiles.length === 0) {
+      setEnrollError('Choose at least one photo of the student.')
+      return
+    }
+
+    setEnrollError(null)
+    setEnrollMessage(null)
+    setEnrolling(true)
+    try {
+      const formData = new FormData()
+      enrollFiles.forEach((file) => formData.append('files', file))
+
+      const response = await studentApi.enrollFace(enrollStudent.id, formData)
+      setEnrollMessage(
+        response.data?.message || 'Face photos were saved.'
+      )
+      setEnrollSkipped(
+        Array.isArray(response.data?.skipped) ? response.data.skipped : []
+      )
+      setEnrollFiles([])
+      await loadStudents()
+    } catch (error: any) {
+      setEnrollError(errorMessage(error, 'Could not enroll these photos.'))
+    } finally {
+      setEnrolling(false)
+    }
+  }
+
   return (
     <Layout>
       <h2>Students</h2>
@@ -296,6 +352,54 @@ const Students: React.FC = () => {
           </div>
         )}
 
+        {mode === 'enroll' && enrollStudent && (
+          <div className="form-section">
+            <h3>Enroll Face — {enrollStudent.name} ({enrollStudent.student_id})</h3>
+            <p>
+              Upload 3-5 clear, front-facing photos of this student. One face per
+              photo. These photos let attendance be marked from a group picture.
+            </p>
+            <div className="form-group">
+              <label>Face photos</label>
+              <input
+                type="file"
+                multiple
+                accept="image/*"
+                onChange={(e) => setEnrollFiles(Array.from(e.target.files || []))}
+              />
+              <small>
+                {enrollFiles.length > 0
+                  ? `${enrollFiles.length} photo(s) selected.`
+                  : 'No photos selected yet.'}
+              </small>
+            </div>
+
+            {enrollError && <p className="form-error">{enrollError}</p>}
+            {enrollMessage && <p className="form-success">{enrollMessage}</p>}
+            {enrollSkipped.length > 0 && (
+              <ul className="enroll-skipped">
+                {enrollSkipped.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            )}
+
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={saveEnrollment}
+                disabled={enrolling || enrollFiles.length === 0}
+              >
+                {enrolling ? 'Saving face photos...' : 'Save Face Photos'}
+              </button>
+              <button type="button" className="btn-outline" onClick={closeEnroll}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
         {mode === 'view' && (
           <Card>
             {loading ? (
@@ -304,16 +408,24 @@ const Students: React.FC = () => {
               <p>No students yet. Use Add Student to create the first one.</p>
             ) : (
               <Table
-                headers={'Roll No.,Student,Email,Course,Branch,Section,Semester,Actions'.split(',')}
+                headers={
+                  'Roll No.,Student,Email,Course,Section,Face,Actions'.split(',')
+                }
                 rows={students.map((student) => [
                   student.student_id,
                   student.name,
                   student.email || '-',
                   student.course,
-                  student.branch,
                   student.section,
-                  String(student.semester),
+                  student.face_enrolled ? 'Enrolled' : 'Not enrolled',
                   <div key={student.id} className="row-actions">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => openEnroll(student)}
+                    >
+                      Enroll Face
+                    </button>
                     <button
                       type="button"
                       className="btn-secondary"

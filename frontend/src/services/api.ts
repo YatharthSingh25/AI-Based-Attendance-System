@@ -12,13 +12,13 @@ export const isTeacherRole = (role?: string | null): boolean => {
   return value === "FACULTY" || value === "ADMIN"
 }
 
-// Create axios instance with base URL and default headers
+// Create axios instance with base URL. Content-Type is deliberately not set
+// here: axios then sends JSON for plain objects and multipart (with boundary)
+// for FormData. A global application/json default would serialise uploads to
+// an empty object.
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
-  headers: {
-    "Content-Type": "application/json",
-  },
 })
 
 // Attach the current access token to every request at request time.
@@ -128,14 +128,9 @@ export const studentApi = {
     api.delete(`/api/students/${studentId}`),
 
   enrollFace: (studentId: string, formData: FormData) =>
-    api.post(`/api/students/${studentId}/enroll-face`, formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-      onUploadProgress: (progressEvent) => {
-        // Handle upload progress if needed
-      },
-    }),
+    // Do not pass a headers object: the instance default is JSON, and axios
+    // only sets the multipart boundary itself when the config has no override.
+    api.post(`/api/students/${studentId}/enroll-face`, formData),
 }
 
 // Attendance APIs

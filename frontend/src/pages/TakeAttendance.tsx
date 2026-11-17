@@ -22,11 +22,24 @@ interface PersistedAttendance {
   verified: boolean
 }
 
-interface SimulatedFace {
-  student: string
-  confidence: number
-  status: 'present' | 'review' | 'unknown'
+interface MarkedStudent {
+  student_id: string
   name: string
+  confidence: number
+}
+
+interface AlreadyMarked {
+  student_id: string
+  name: string
+  status: string
+}
+
+interface RecognitionResult {
+  message: string
+  faces_detected: number
+  marked_present: MarkedStudent[]
+  already_marked: AlreadyMarked[]
+  unknown_faces: number
 }
 
 const errorMessage = (error: any, fallback: string): string => {
@@ -40,15 +53,20 @@ const errorMessage = (error: any, fallback: string): string => {
 const TakeAttendance: React.FC = () => {
   const [mode, setMode] = useState<'photo' | 'live'>('photo')
   const [image, setImage] = useState<string | null>(null)
-  const [faces, setFaces] = useState<SimulatedFace[]>([])
   const [sessions, setSessions] = useState<AttendanceSession[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState('')
   const [sessionsLoading, setSessionsLoading] = useState(false)
   const [sessionsError, setSessionsError] = useState<string | null>(null)
   const [processing, setProcessing] = useState(false)
-  const [photoNotice, setPhotoNotice] = useState<string | null>(null)
+  const [recognition, setRecognition] = useState<RecognitionResult | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [persisted, setPersisted] = useState<PersistedAttendance[]>([])
   const [persistedError, setPersistedError] = useState<string | null>(null)
+
+  const [newSubject, setNewSubject] = useState('Data Structures')
+  const [newSection, setNewSection] = useState('A')
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
 
   const selectedSession = sessions.find((s) => s.id === selectedSessionId)
 
@@ -87,8 +105,8 @@ const TakeAttendance: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    setFaces([])
-    setPhotoNotice(null)
+    setRecognition(null)
+    setUploadError(null)
     if (selectedSessionId) {
       loadPersisted(selectedSessionId)
     } else {
@@ -97,72 +115,102 @@ const TakeAttendance: React.FC = () => {
     }
   }, [selectedSessionId])
 
-  const handleModeChange = (newMode: 'photo' | 'live') => {
-    setMode(newMode)
-    setImage(null)
-    setFaces([])
-    setPhotoNotice(null)
-  }
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files[0]
+    const file = e.target.files?.[0]
     if (file) {
       const reader = new FileReader()
       reader.onload = () => setImage(reader.result as string)
       reader.readAsDataURL(file)
+      setRecognition(null)
+      setUploadError(null)
     }
   }
 
-  const processPhotoAttendance = async () => {
-    if (!image) return
-    if (!selectedSessionId) {
-      alert('Select an attendance session before uploading a classroom photo.')
+  const createSession = async () => {
+    const subject = newSubject.trim()
+    if (!subject) {
+      setCreateError('Enter a subject name.')
       return
     }
 
-    setFaces([])
-    setPhotoNotice(null)
-    setProcessing(true)
-
+    setCreating(true)
+    setCreateError(null)
     try {
-      // Send the actual selected session id and a real multipart image upload.
-      const blob = await fetch(image).then((res) => res.blob())
-      const response = await attendanceApi.photoAttendance(selectedSessionId, blob)
-
-      setPhotoNotice(
-        response.data?.message ||
-          'The backend received the photo but did not produce a recognition result.'
-      )
-
-      // Re-read the database records so the UI reflects what is actually saved.
-      await loadPersisted(selectedSessionId)
-
-      // Simulated output for UI demonstration only. The backend does not
-      // perform face detection or recognition yet, so these rows are NOT
-      // attendance records and are never persisted.
-      setFaces([
-        { student: 'Rahul Sharma', confidence: 97, status: 'present', name: 'Rahul Sharma' },
-        { student: 'Priya Mehta', confidence: 94, status: 'present', name: 'Priya Mehta' },
-        { student: 'Amit Kumar', confidence: 61, status: 'review', name: 'Amit Kumar' },
-      ])
+      const response = await attendanceApi.createSession({
+        subject,
+        section: newSection,
+      })
+      const created = response.data?.session
+      await loadSessions()
+      if (created?.id) {
+        setSelectedSessionId(created.id)
+      }
     } catch (error: any) {
-      console.error('Photo attendance processing error:', error)
-      alert(errorMessage(error, 'Error uploading the classroom photo.'))
+      setCreateError(errorMessage(error, 'Could not create the session.'))
     } finally {
-      setProcessing(false)
+      setCreating(false)
     }
   }
 
-  const processLiveFrame = () => {
-    alert(
-      'Live camera attendance is not implemented in the frontend yet. The Live Camera page is currently a demo and does not send frames to the backend.'
-    )
+  const processPhotoAttendance = async () => {    if (!image) return
+    if (!selectedSessionId) {
+      setUploadError('Select an attendance session before uploading a photo.')
+      return
+    }
+
+    setRecognition(null)
+    setUploadError(null)
+    setProcessing(true)
+
+    try {
+      const blob = await fetch(image).then((res) => res.blob())
+      const response = await attendanceApi.photoAttendance(selectedSessionId, blob)
+      setRecognition(response.data as RecognitionResult)
+      await loadPersisted(selectedSessionId)
+    } catch (error: any) {
+      setUploadError(errorMessage(error, 'Could not process this photo.'))
+    } finally {
+      setProcessing(false)
+    }
   }
 
   return (
     <Layout>
       <h2>Take Attendance</h2>
       <div className="take-attendance-container">
+        <div className="session-create">
+          <label>
+            Subject{' '}
+            <input
+              type="text"
+              value={newSubject}
+              onChange={(e) => setNewSubject(e.target.value)}
+              placeholder="Data Structures"
+            />
+          </label>
+          <label>
+            Section{' '}
+            <select
+              className="select"
+              value={newSection}
+              onChange={(e) => setNewSection(e.target.value)}
+            >
+              <option>A</option>
+              <option>B</option>
+              <option>C</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={createSession}
+            disabled={creating}
+          >
+            {creating ? 'Creating...' : 'Start New Session'}
+          </button>
+        </div>
+        {createError && <p className="form-error">{createError}</p>}
+
         <div className="controls">
           <label>
             Attendance Session{' '}
@@ -195,75 +243,108 @@ const TakeAttendance: React.FC = () => {
           <span className="date">Date: {new Date().toLocaleDateString()}</span>
         </div>
 
-        {sessionsError && <p style={{ color: '#b91c1c' }}>{sessionsError}</p>}
+        {sessionsError && <p className="form-error">{sessionsError}</p>}
         {!sessionsLoading && !sessionsError && sessions.length === 0 && (
-          <p style={{ color: '#b45309' }}>
-            No attendance sessions exist yet. Create one with
-            {' '}
+          <p className="form-warning">
+            No attendance sessions exist yet. Create one with{' '}
             <code>POST /api/attendance/sessions</code>, then refresh this page.
           </p>
         )}
 
         <div className="modes">
-          <div className="mode-card photo-mode" onClick={() => handleModeChange('photo')}>
-            <h3>📷 CLASSROOM PHOTO</h3>
-            <p>Upload classroom image</p>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-            />
+          <div
+            className={mode === 'photo' ? 'mode-card photo-mode active' : 'mode-card photo-mode'}
+            onClick={() => setMode('photo')}
+          >
+            <h3>CLASSROOM PHOTO</h3>
+            <p>Upload a photo of one student or a group</p>
+            <input type="file" accept="image/*" onChange={handleFileChange} />
           </div>
 
-          <div className="mode-card live-mode" onClick={() => handleModeChange('live')}>
-            <h3>🎥 LIVE CAMERA</h3>
-            <p>Start computer webcam</p>
-            <button className="btn-secondary" disabled>
-              Start Camera
-            </button>
+          <div
+            className={mode === 'live' ? 'mode-card live-mode active' : 'mode-card live-mode'}
+            onClick={() => setMode('live')}
+          >
+            <h3>LIVE CAMERA</h3>
+            <p>Capture from the webcam</p>
           </div>
         </div>
 
-        {mode === 'photo' && image && (
+        {mode === 'photo' && (
           <div className="photo-preview">
-            <h3>Classroom Image Preview</h3>
-            <img src={image} alt="Classroom" style={{ maxWidth: '100%' }} />
-            <p>
-              The image is uploaded to the backend. Face recognition is not
-              implemented yet, so no attendance records are created.
-            </p>
-            <button
-              className="btn-primary"
-              onClick={processPhotoAttendance}
-              disabled={processing || !selectedSessionId}
-            >
-              {processing ? 'Uploading...' : 'Upload Classroom Photo'}
-            </button>
+            {image ? (
+              <>
+                <h3>Photo Preview</h3>
+                <img src={image} alt="Classroom" style={{ maxWidth: '100%' }} />
+                <p>
+                  Every detected face is matched against enrolled students in
+                  section {selectedSession?.section || '-'}. Matching students are
+                  marked present.
+                </p>
+                <button
+                  className="btn-primary"
+                  onClick={processPhotoAttendance}
+                  disabled={processing || !selectedSessionId}
+                >
+                  {processing ? 'Recognising faces...' : 'Mark Attendance from Photo'}
+                </button>
+              </>
+            ) : (
+              <p>Choose a photo above to begin.</p>
+            )}
           </div>
         )}
 
         {mode === 'live' && (
           <div className="live-interface">
-            <h3>Live Camera Interface</h3>
-            <p>Browser webcam access required</p>
-            <div className="camera-placeholder">
-              <p>Camera preview area - would use navigator.mediaDevices.getUserMedia()</p>
-            </div>
-            <p>Live frame processing is not wired to the backend in this page.</p>
-            <button onClick={processLiveFrame} className="btn-primary">
-              Start Live Attendance
-            </button>
+            <p>
+              Live capture lives on the Live Camera page, where a frame is sent
+              to the same recognition service.
+            </p>
+            <a className="btn-primary" href="/live-camera">
+              Open Live Camera
+            </a>
           </div>
         )}
 
-        {photoNotice && (
+        {uploadError && <p className="form-error">{uploadError}</p>}
+
+        {recognition && (
           <div className="attendance-results">
-            <h3>Backend Response</h3>
-            <p>{photoNotice}</p>
-            <p style={{ color: '#b45309' }}>
-              This request uploads the image only. It does not create attendance
-              records.
+            <h3>Result</h3>
+            <p>{recognition.message}</p>
+            <p>
+              Faces detected: {recognition.faces_detected} · Marked present:{' '}
+              {recognition.marked_present.length} · Unknown:{' '}
+              {recognition.unknown_faces}
             </p>
+
+            {recognition.marked_present.length > 0 && (
+              <Table
+                headers={['Roll No.', 'Student', 'Confidence']}
+                rows={recognition.marked_present.map((student) => [
+                  student.student_id,
+                  student.name,
+                  `${student.confidence}%`,
+                ])}
+              />
+            )}
+
+            {recognition.already_marked.length > 0 && (
+              <>
+                <h4>Already marked for this session</h4>
+                <Table
+                  headers={['Roll No.', 'Student', 'Status']}
+                  rows={recognition.already_marked.map((student) => [
+                    student.student_id,
+                    student.name,
+                    <Badge key={student.student_id} variant="secondary">
+                      {student.status}
+                    </Badge>,
+                  ])}
+                />
+              </>
+            )}
           </div>
         )}
 
@@ -275,7 +356,7 @@ const TakeAttendance: React.FC = () => {
               : ''}
           </h3>
           {!selectedSessionId && <p>Select a session to view its saved records.</p>}
-          {persistedError && <p style={{ color: '#b91c1c' }}>{persistedError}</p>}
+          {persistedError && <p className="form-error">{persistedError}</p>}
           {selectedSessionId && !persistedError && persisted.length === 0 && (
             <p>No attendance records are saved for this session.</p>
           )}
@@ -285,7 +366,12 @@ const TakeAttendance: React.FC = () => {
               rows={persisted.map((record) => [
                 `${record.id}`,
                 `${record.student_id}`,
-                record.status,
+                <Badge
+                  key={record.id}
+                  variant={record.status === 'present' ? 'success' : 'danger'}
+                >
+                  {record.status}
+                </Badge>,
                 record.confidence === null ? '-' : `${record.confidence}%`,
                 record.method,
                 record.verified ? 'yes' : 'no',
@@ -301,30 +387,6 @@ const TakeAttendance: React.FC = () => {
             Refresh Saved Records
           </button>
         </div>
-
-        {faces.length > 0 && (
-          <div className="attendance-results">
-            <h3>Simulated Demo Results - NOT saved to the database</h3>
-            <p style={{ color: '#b45309' }}>
-              These rows are hardcoded demo data. They are not produced by a
-              recognition model and are not attendance records.
-            </p>
-            <Table
-              headers={'#,Simulated Student,Status,Confidence'.split(',')}
-              rows={faces.map((f, i) => [
-                `${i + 1}`,
-                f.name,
-                <Badge key={i} variant={f.status === 'present' ? 'success' : f.status === 'review' ? 'warning' : 'danger'}>{f.status}</Badge>,
-                `${f.confidence}%`,
-              ])}
-            />
-            <p>
-              To record real attendance, the backend must detect faces, match
-              them to enrolled students, and insert verified rows into the
-              attendance table.
-            </p>
-          </div>
-        )}
       </div>
     </Layout>
   )

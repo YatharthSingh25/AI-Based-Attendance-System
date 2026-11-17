@@ -14,10 +14,9 @@ email-validator  # required for Pydantic EmailStr validation
 # For PostgreSQL connectivity
 psycopg2-binary==2.9.9  # or psycopg3
 
-# For face recognition AI (optional - mock mode available without these)
-# opencv-python==4.8.0  # for OpenCV face detector
-# insightface==0.7.3  # for InsightFace recognition
-# numpy>=1.24.0  # for array operations (used by AI services)
+# For face recognition AI (OpenCV only: Haar cascade detection + LBPH matching,
+# so there is no model download and no extra native build step)
+opencv-contrib-python-headless==4.9.0.80
 
 # For machine learning attendance risk prediction
 scikit-learn==1.4.1.post1

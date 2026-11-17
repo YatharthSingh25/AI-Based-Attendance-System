@@ -975,5 +975,102 @@ class TestStudentSelfAccess:
         assert rows[0]["subject"] == "Data Structures"
 
 
+class TestFaceRecognition:
+    """Face enrollment and photo attendance behaviour."""
+
+    @staticmethod
+    def _blank_png() -> bytes:
+        import cv2
+        import numpy as np
+
+        ok, buffer = cv2.imencode(".png", np.full((320, 320, 3), 255, np.uint8))
+        assert ok
+        return buffer.tobytes()
+
+    def test_student_cannot_enroll_face(self, auth_client, db_session):
+        headers = _role_headers(db_session, "STUDENT")
+        response = auth_client.post(
+            f"/api/students/{uuid.uuid4().int % 100000}/enroll-face",
+            headers=headers,
+            files=[("files", ("blank.png", self._blank_png(), "image/png"))],
+        )
+        assert response.status_code == 403, response.text
+
+    def test_enrollment_rejects_a_photo_without_a_face(self, auth_client, db_session):
+        faculty = _role_headers(db_session, "FACULTY")
+        student = Student(
+            student_id=f"ENR{uuid.uuid4().int % 1000:03d}",
+            name="Enroll Target",
+            email=f"enroll-{uuid.uuid4().hex[:8]}@college.edu",
+            course="Data Structures",
+            branch="CSE",
+            section="A",
+            semester=4,
+        )
+        db_session.add(student)
+        db_session.commit()
+        db_session.refresh(student)
+
+        response = auth_client.post(
+            f"/api/students/{student.id}/enroll-face",
+            headers=faculty,
+            files=[("files", ("blank.png", self._blank_png(), "image/png"))],
+        )
+        assert response.status_code == 400, response.text
+        assert "no face was found" in response.json()["detail"].lower()
+
+    def test_photo_attendance_explains_missing_enrollment(self, auth_client, db_session):
+        faculty = _role_headers(db_session, "FACULTY")
+        section = f"Z{uuid.uuid4().hex[:2].upper()}"
+
+        created = auth_client.post(
+            "/api/attendance/sessions",
+            headers=faculty,
+            json={"subject": "Networks", "section": section},
+        )
+        assert created.status_code == 200, created.text
+        session_id = created.json()["session"]["id"]
+
+        response = auth_client.post(
+            "/api/attendance/photo",
+            headers=faculty,
+            data={"session_id": session_id},
+            files={"image_data": ("class.png", self._blank_png(), "image/png")},
+        )
+        assert response.status_code == 400, response.text
+        assert "enrolled faces" in response.json()["detail"].lower()
+
+    def test_stored_samples_round_trip(self):
+        import numpy as np
+
+        from app.services.face import recognizer as face
+
+        rng = np.random.default_rng(7)
+        samples = [
+            rng.integers(0, 255, size=(face.FACE_SIZE, face.FACE_SIZE), dtype=np.uint8),
+            rng.integers(0, 255, size=(face.FACE_SIZE, face.FACE_SIZE), dtype=np.uint8),
+        ]
+        payload = face.dump_samples([face.encode_sample(sample) for sample in samples])
+        restored = face.load_samples(payload)
+
+        assert len(restored) == 2
+        assert restored[0].shape == (face.FACE_SIZE, face.FACE_SIZE)
+        assert np.array_equal(restored[0], samples[0])
+
+    def test_placeholder_rows_are_ignored(self):
+        from app.services.face import recognizer as face
+
+        assert face.load_samples("[]") == []
+        assert face.load_samples("") == []
+        assert face.load_samples(None) == []
+
+    def test_distance_becomes_a_lower_confidence(self):
+        from app.services.face import recognizer as face
+
+        assert face.confidence_from_distance(0) == 100.0
+        assert face.confidence_from_distance(40) == 80.0
+        assert face.confidence_from_distance(200) == 0.0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
