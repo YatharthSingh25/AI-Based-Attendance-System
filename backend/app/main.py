@@ -493,6 +493,18 @@ async def delete_student(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Student not found"
         )
+
+    # Attendance rows and face embeddings reference this student with a
+    # non-nullable foreign key and have no database-level cascade, so remove
+    # them first or the delete would fail with an integrity error.
+    from app.models import FaceEmbedding
+
+    db.query(Attendance).filter(Attendance.student_id == student.id).delete(
+        synchronize_session=False
+    )
+    db.query(FaceEmbedding).filter(FaceEmbedding.student_id == student.id).delete(
+        synchronize_session=False
+    )
     db.delete(student)
     db.commit()
     return {"message": "Student deleted successfully"}

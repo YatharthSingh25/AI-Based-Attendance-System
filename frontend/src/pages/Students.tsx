@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Table, Badge } from '../components/ui'
+import { Card, Table } from '../components/ui'
 import Layout from '../layouts/MainLayout'
-import api, { studentApi } from '../services/api'
+import { studentApi } from '../services/api'
 
 interface Student {
   id: string
@@ -14,141 +14,231 @@ interface Student {
   semester: number
 }
 
+type Mode = 'view' | 'form'
+
+const EMPTY_FORM: Partial<Student> = {
+  student_id: '',
+  name: '',
+  email: '',
+  course: 'Data Structures',
+  branch: 'CSE',
+  section: 'A',
+  semester: 1,
+}
+
+// The backend enforces this pattern; check it here so the user sees why.
+const STUDENT_ID_PATTERN = /^[A-Z]{3}[0-9]{3}$/
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+const errorMessage = (error: any, fallback: string): string => {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail) && detail.length > 0) {
+    // FastAPI validation errors: surface the first field problem.
+    const first = detail[0]
+    const field = Array.isArray(first?.loc) ? first.loc[first.loc.length - 1] : null
+    const msg = first?.msg || 'invalid value'
+    return field ? `${field}: ${msg}` : msg
+  }
+  if (error?.message) return `${fallback} (${error.message})`
+  return fallback
+}
+
 const Students: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([])
   const [loading, setLoading] = useState(false)
-  const [mode, setMode] = useState<'view' | 'add' | 'enroll' | 'edit'>('view')
-  const [newStudent, setNewStudent] = useState<Partial<Student>>({
-    student_id: '',
-    name: '',
-    email: '',
-    course: '',
-    branch: '',
-    section: '',
-    semester: 1,
-  })
-  const [enrollImages, setEnrollImages] = useState<FileList | null>(null)
+  const [mode, setMode] = useState<Mode>('view')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [form, setForm] = useState<Partial<Student>>(EMPTY_FORM)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [listError, setListError] = useState<string | null>(null)
 
-  // Fetch students from backend
-  useEffect(() => {
-    const fetchStudents = async () => {
-      setLoading(true)
-      try {
-        const response = await studentApi.getStudents()
-        setStudents(response.data || [])
-      } catch (error) {
-        console.error('Failed to fetch students:', error)
-        // Do not fall back to mock data - show empty list and alert user
-        setStudents([])
-      } finally {
-        setLoading(false)
-      }
+  const loadStudents = async () => {
+    setLoading(true)
+    setListError(null)
+    try {
+      const response = await studentApi.getStudents()
+      setStudents(Array.isArray(response.data) ? response.data : [])
+    } catch (error: any) {
+      setStudents([])
+      setListError(errorMessage(error, 'Failed to load students.'))
+    } finally {
+      setLoading(false)
     }
-    fetchStudents()
-  }, [])
-
-  const handleAddStudent = () => {
-    setMode('add')
   }
 
-  const handleEnrollFace = () => {
-    setMode('enroll')
+  useEffect(() => {
+    loadStudents()
+  }, [])
+
+  const openAdd = () => {
+    setEditingId(null)
+    setForm(EMPTY_FORM)
+    setFormError(null)
+    setMode('form')
+  }
+
+  const openEdit = (student: Student) => {
+    setEditingId(student.id)
+    setForm({
+      student_id: student.student_id,
+      name: student.name,
+      email: student.email,
+      course: student.course,
+      branch: student.branch,
+      section: student.section,
+      semester: student.semester,
+    })
+    setFormError(null)
+    setMode('form')
+  }
+
+  const closeForm = () => {
+    setMode('view')
+    setEditingId(null)
+    setFormError(null)
   }
 
   const saveStudent = async () => {
-    if (!newStudent.name || !newStudent.student_id) return
+    const studentId = (form.student_id || '').trim().toUpperCase()
+    const name = (form.name || '').trim()
+    const email = (form.email || '').trim()
+
+    if (!name) {
+      setFormError('Name is required.')
+      return
+    }
+    if (!editingId && !STUDENT_ID_PATTERN.test(studentId)) {
+      setFormError(
+        'Student ID must be 3 capital letters followed by 3 digits, for example CSE005.'
+      )
+      return
+    }
+    if (!email || !EMAIL_PATTERN.test(email)) {
+      setFormError('A valid email address is required, for example cse005@college.edu.')
+      return
+    }
+
+    setFormError(null)
+    setSaving(true)
     try {
-      await studentApi.createStudent({
-        student_id: newStudent.student_id,
-        name: newStudent.name,
-        email: newStudent.email || '',
-        course: newStudent.course || 'Data Structures',
-        branch: newStudent.branch || 'CSE',
-        section: newStudent.section || 'A',
-        semester: newStudent.semester || 1,
-      })
-      // Refresh the list
-      const response = await studentApi.getStudents()
-      setStudents(response.data || [])
+      if (editingId) {
+        await studentApi.updateStudent(editingId, {
+          name,
+          email,
+          course: form.course || 'Data Structures',
+          branch: form.branch || 'CSE',
+          section: form.section || 'A',
+          semester: form.semester || 1,
+        })
+        setNotice(`${name} was updated.`)
+      } else {
+        await studentApi.createStudent({
+          student_id: studentId,
+          name,
+          email,
+          course: form.course || 'Data Structures',
+          branch: form.branch || 'CSE',
+          section: form.section || 'A',
+          semester: form.semester || 1,
+        })
+        setNotice(`${name} (${studentId}) was added.`)
+      }
+
+      await loadStudents()
       setMode('view')
-      setNewStudent({
-        student_id: '',
-        name: '',
-        email: '',
-        course: '',
-        branch: '',
-        section: '',
-        semester: 1,
-      })
-    } catch (error) {
-      console.error('Failed to create student:', error)
+      setEditingId(null)
+      setForm(EMPTY_FORM)
+    } catch (error: any) {
+      setFormError(errorMessage(error, 'Could not save the student.'))
+    } finally {
+      setSaving(false)
     }
   }
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setEnrollImages(e.target.files as FileList)
+  const deleteStudent = async (student: Student) => {
+    const confirmed = window.confirm(
+      `Delete ${student.name} (${student.student_id})? Their attendance records will also be removed.`
+    )
+    if (!confirmed) return
+
+    setNotice(null)
+    setListError(null)
+    try {
+      await studentApi.deleteStudent(student.id)
+      setNotice(`${student.name} (${student.student_id}) was deleted.`)
+      await loadStudents()
+    } catch (error: any) {
+      setListError(errorMessage(error, 'Could not delete the student.'))
+    }
   }
 
-  const generateEmbedding = async () => {
-    if (!enrollImages) return
-    // Would process images and generate face embeddings via API
-    // For now, alert the user
-    alert('Face embedding generation - API integration pending')
-    setEnrollImages(null)
-    setMode('view')
-  }
+  const update = (field: keyof Student, value: string | number) =>
+    setForm((current) => ({ ...current, [field]: value }))
 
   return (
     <Layout>
       <h2>Students</h2>
       <div className="students-container">
         <div className="actions">
-          <button onClick={handleAddStudent} className="btn-primary">
+          <button onClick={openAdd} className="btn-primary">
             Add Student
-          </button>
-          <button onClick={handleEnrollFace} className="btn-secondary">
-            Enroll Face
           </button>
         </div>
 
-        {mode === 'add' && (
+        {notice && <p className="form-success">{notice}</p>}
+        {listError && <p className="form-error">{listError}</p>}
+
+        {mode === 'form' && (
           <div className="form-section">
-            <h3>Add New Student</h3>
-            <form>
+            <h3>{editingId ? 'Edit Student' : 'Add New Student'}</h3>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                saveStudent()
+              }}
+            >
               <div className="form-group">
                 <label>Student ID</label>
                 <input
                   type="text"
                   placeholder="CSE005"
-                  value={newStudent.student_id || ''}
-                  onChange={(e) => setNewStudent({ ...newStudent, student_id: e.target.value })}
-                  required
+                  value={form.student_id || ''}
+                  onChange={(e) => update('student_id', e.target.value.toUpperCase())}
+                  maxLength={6}
+                  disabled={Boolean(editingId)}
                 />
+                <small>Format: 3 letters and 3 digits (CSE005). Cannot be changed later.</small>
               </div>
               <div className="form-group">
                 <label>Name</label>
                 <input
                   type="text"
                   placeholder="Enter student name"
-                  value={newStudent.name || ''}
-                  onChange={(e) => setNewStudent({ ...newStudent, name: e.target.value })}
-                  required
+                  value={form.name || ''}
+                  onChange={(e) => update('name', e.target.value)}
                 />
               </div>
               <div className="form-group">
                 <label>Email</label>
                 <input
                   type="email"
-                  placeholder="student@college.edu"
-                  value={newStudent.email || ''}
-                  onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })}
+                  placeholder="cse005@college.edu"
+                  value={form.email || ''}
+                  onChange={(e) => update('email', e.target.value)}
                 />
+                <small>
+                  The student signs in with this email, so it must match the
+                  account they register.
+                </small>
               </div>
               <div className="form-group">
                 <label>Course</label>
                 <select
-                  value={newStudent.course || ''}
-                  onChange={(e) => setNewStudent({ ...newStudent, course: e.target.value })}
+                  value={form.course || 'Data Structures'}
+                  onChange={(e) => update('course', e.target.value)}
                 >
                   <option>Data Structures</option>
                   <option>Database Management</option>
@@ -161,8 +251,8 @@ const Students: React.FC = () => {
               <div className="form-group">
                 <label>Branch</label>
                 <select
-                  value={newStudent.branch || ''}
-                  onChange={(e) => setNewStudent({ ...newStudent, branch: e.target.value })}
+                  value={form.branch || 'CSE'}
+                  onChange={(e) => update('branch', e.target.value)}
                 >
                   <option>CSE</option>
                   <option>ECE</option>
@@ -173,8 +263,8 @@ const Students: React.FC = () => {
               <div className="form-group">
                 <label>Section</label>
                 <select
-                  value={newStudent.section || ''}
-                  onChange={(e) => setNewStudent({ ...newStudent, section: e.target.value })}
+                  value={form.section || 'A'}
+                  onChange={(e) => update('section', e.target.value)}
                 >
                   <option>A</option>
                   <option>B</option>
@@ -187,60 +277,61 @@ const Students: React.FC = () => {
                   type="number"
                   min="1"
                   max="8"
-                  value={newStudent.semester || 1}
-                  onChange={(e) => setNewStudent({ ...newStudent, semester: Number(e.target.value) })}
+                  value={form.semester || 1}
+                  onChange={(e) => update('semester', Number(e.target.value))}
                 />
               </div>
-              <button type="button" className="btn-secondary" onClick={saveStudent}>
-                Save Student
-              </button>
-              <button type="button" className="btn-outline" onClick={() => setMode('view')}>
-                Cancel
-              </button>
-            </form>
-          </div>
-        )}
 
-        {mode === 'enroll' && (
-          <div className="form-section">
-            <h3>Enroll Face Images</h3>
-            <p>Student: {newStudent?.name || 'Select student'} ({newStudent?.student_id || ''})</p>
-            <p>Upload 3-5 face images for enrollment</p>
-            <input
-              type="file"
-              multiple
-              accept="image/*"
-              onChange={handleImageSelect}
-            />
-            <button onClick={generateEmbedding} className="btn-primary" disabled={!enrollImages}>
-              Generate Face Embedding
-            </button>
-            <button onClick={() => setMode('view')} className="btn-secondary">
-              Cancel
-            </button>
+              {formError && <p className="form-error">{formError}</p>}
+
+              <div className="form-actions">
+                <button type="submit" className="btn-primary" disabled={saving}>
+                  {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Save Student'}
+                </button>
+                <button type="button" className="btn-outline" onClick={closeForm}>
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
         {mode === 'view' && (
           <Card>
-            <Table
-              headers={"Roll No.,Student,Course,Branch,Section,Semester,Actions".split(",")}
-              rows={students.map((s, i) => [
-                s.student_id,
-                s.name,
-                s.course,
-                s.branch,
-                s.section,
-                s.semester,
-                (
-                  <div key={s.id}>
-                    <button>View</button>
-                    <button>Edit</button>
-                    <button>Delete</button>
-                  </div>
-                ),
-              ])}
-            />
+            {loading ? (
+              <p>Loading students...</p>
+            ) : students.length === 0 ? (
+              <p>No students yet. Use Add Student to create the first one.</p>
+            ) : (
+              <Table
+                headers={'Roll No.,Student,Email,Course,Branch,Section,Semester,Actions'.split(',')}
+                rows={students.map((student) => [
+                  student.student_id,
+                  student.name,
+                  student.email || '-',
+                  student.course,
+                  student.branch,
+                  student.section,
+                  String(student.semester),
+                  <div key={student.id} className="row-actions">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => openEdit(student)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-danger"
+                      onClick={() => deleteStudent(student)}
+                    >
+                      Delete
+                    </button>
+                  </div>,
+                ])}
+              />
+            )}
           </Card>
         )}
       </div>

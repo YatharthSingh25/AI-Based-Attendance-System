@@ -622,6 +622,60 @@ button {
   margin-bottom: 0.85rem;
 }
 
+.form-section form .form-error,
+.form-section form .form-actions {
+  grid-column: 1 / -1;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+.form-group small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.form-success {
+  margin: 0 0 0.9rem;
+  padding: 0.55rem 0.7rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  color: #15803d;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.btn-danger {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-danger:hover {
+  background: #fee2e2;
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.row-actions button {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+}
+
 /* ---------------------------- Take attendance --------------------------- */
 
 .controls {
