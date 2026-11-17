@@ -12,6 +12,46 @@ export const isTeacherRole = (role?: string | null): boolean => {
   return value === "FACULTY" || value === "ADMIN"
 }
 
+// A token is only useful while it is unexpired. The backend answers every JWT
+// problem (expired, tampered, wrong secret) with the same 401, so check the
+// embedded expiry here to send the user to the login page before an action
+// fails with "Invalid authentication credentials".
+const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
+  try {
+    const part = token.split(".")[1]
+    if (!part) return null
+    const base64 = part.replace(/-/g, "+").replace(/_/g, "/")
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")
+    return JSON.parse(atob(padded))
+  } catch {
+    return null
+  }
+}
+
+const isTokenExpired = (token: string, skewSeconds = 30): boolean => {
+  const payload = decodeJwtPayload(token)
+  const exp = payload?.exp
+  if (typeof exp !== "number") {
+    // Unreadable expiry: let the server decide rather than logging out blindly.
+    return false
+  }
+  return exp * 1000 <= Date.now() + skewSeconds * 1000
+}
+
+const clearSession = () => {
+  if (typeof window === "undefined") return
+  localStorage.removeItem("access_token")
+  localStorage.removeItem("user")
+}
+
+export const SESSION_EXPIRED_PARAM = "expired"
+
+const redirectToLogin = () => {
+  if (typeof window === "undefined") return
+  if (window.location.pathname === "/login") return
+  window.location.assign(`/login?${SESSION_EXPIRED_PARAM}=1`)
+}
+
 // Create axios instance with base URL. Content-Type is deliberately not set
 // here: axios then sends JSON for plain objects and multipart (with boundary)
 // for FormData. A global application/json default would serialise uploads to
@@ -35,6 +75,26 @@ api.interceptors.request.use(
     return config
   },
   (error) => Promise.reject(error)
+)
+
+// A 401 means the stored token is no longer accepted (most often expired).
+// Clear it and send the user to the login page instead of surfacing the raw
+// "Invalid authentication credentials" message from the backend. The login
+// request itself is exempt: there a 401 means wrong credentials.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error?.response?.status
+    const url: string = error?.config?.url || ""
+    const isLoginAttempt = url.includes("/api/auth/login")
+
+    if (status === 401 && !isLoginAttempt) {
+      clearSession()
+      redirectToLogin()
+    }
+
+    return Promise.reject(error)
+  }
 )
 
 // Auth APIs
@@ -80,11 +140,22 @@ export const authApi = {
       localStorage.setItem("user", JSON.stringify(user))
     }
   },
-  logout: () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("access_token")
-      localStorage.removeItem("user")
+
+  // True only when a token exists and has not expired. Route guards use this
+  // so a stale token lands on the login page instead of the first API call.
+  hasValidSession: (): boolean => {
+    if (typeof window === "undefined") return false
+    const token = localStorage.getItem("access_token")
+    if (!token) return false
+    if (isTokenExpired(token)) {
+      clearSession()
+      return false
     }
+    return true
+  },
+
+  logout: () => {
+    clearSession()
   },
 }
 

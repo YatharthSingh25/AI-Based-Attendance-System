@@ -1,14 +1,32 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { authApi, isTeacherRole, type LoginTab } from '../services/api'
+import React, { useEffect, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  authApi,
+  isTeacherRole,
+  SESSION_EXPIRED_PARAM,
+  type LoginTab,
+} from '../services/api'
 
 const Login: React.FC = () => {
   const [tab, setTab] = useState<LoginTab>('teacher')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // The API layer redirects here with ?expired=1 after clearing a rejected
+  // token. Explain why, then drop the marker so a reload is quiet.
+  useEffect(() => {
+    if (searchParams.get(SESSION_EXPIRED_PARAM) !== '1') return
+
+    setNotice('Your session expired. Please sign in again.')
+    const next = new URLSearchParams(searchParams)
+    next.delete(SESSION_EXPIRED_PARAM)
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const switchTab = (next: LoginTab) => {
     setTab(next)
@@ -18,6 +36,7 @@ const Login: React.FC = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setNotice(null)
     setSubmitting(true)
 
     try {
@@ -114,6 +133,11 @@ const Login: React.FC = () => {
               required
             />
           </div>
+          {notice && (
+            <p role="status" className="form-warning">
+              {notice}
+            </p>
+          )}
           {error && (
             <p role="alert" className="form-error">
               {error}

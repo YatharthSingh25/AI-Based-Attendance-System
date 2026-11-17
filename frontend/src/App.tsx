@@ -19,10 +19,14 @@ const RequireRole: React.FC<{ allow: Area; children: React.ReactElement }> = ({
   allow,
   children,
 }) => {
-  const token =
-    typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
-  if (!token) {
-    return <Navigate to="/login" replace />
+  const hasToken =
+    typeof window !== 'undefined' && Boolean(localStorage.getItem('access_token'))
+  const hasSession = authApi.hasValidSession()
+
+  if (!hasSession) {
+    // A token that exists but no longer verifies (usually expired) gets an
+    // explanation on the login page instead of a silent redirect.
+    return <Navigate to={hasToken ? '/login?expired=1' : '/login'} replace />
   }
 
   const user = authApi.getCurrentUser()
