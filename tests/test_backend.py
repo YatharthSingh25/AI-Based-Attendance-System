@@ -837,6 +837,137 @@ class TestLoginRoleTabs:
         assert self._login(auth_client, email).status_code == 200
 
 
+class TestStudentFirstLogin:
+    """A teacher-added student claims the account by choosing a password."""
+
+    STUDENT_PASSWORD = "FirstPass123!"
+
+    @staticmethod
+    def _create_student(db_session, email=None):
+        email = email or f"first-{uuid.uuid4().hex[:8]}@college.edu"
+        student = Student(
+            student_id=f"ACT{uuid.uuid4().hex[:3].upper()}",
+            name="First Login Student",
+            email=email,
+            course="Data Structures",
+            branch="CSE",
+            section="A",
+            semester=4,
+        )
+        db_session.add(student)
+        db_session.commit()
+        db_session.refresh(student)
+        return student
+
+    @staticmethod
+    def _activate(auth_client, email, password=STUDENT_PASSWORD):
+        return auth_client.post(
+            "/api/auth/activate",
+            json={"email": email, "password": password},
+        )
+
+    def test_student_sets_password_then_signs_in(self, auth_client, db_session):
+        student = self._create_student(db_session)
+
+        response = self._activate(auth_client, student.email)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["access_token"]
+        assert body["user"]["role"] == "STUDENT"
+        # The account takes its display name from the class record.
+        assert body["user"]["name"] == student.name
+
+        login = auth_client.post(
+            "/api/auth/login",
+            data={
+                "username": student.email,
+                "password": self.STUDENT_PASSWORD,
+                "scope": "student",
+            },
+        )
+        assert login.status_code == 200, login.text
+        assert login.json()["user"]["role"] == "STUDENT"
+
+    def test_wrong_password_is_rejected_after_activation(self, auth_client, db_session):
+        student = self._create_student(db_session)
+        assert self._activate(auth_client, student.email).status_code == 200
+
+        login = auth_client.post(
+            "/api/auth/login",
+            data={
+                "username": student.email,
+                "password": "NotThePassword1!",
+                "scope": "student",
+            },
+        )
+        assert login.status_code == 401, login.text
+        assert "access_token" not in login.json()
+
+    def test_second_activation_is_refused(self, auth_client, db_session):
+        student = self._create_student(db_session)
+        assert self._activate(auth_client, student.email).status_code == 200
+
+        again = self._activate(auth_client, student.email, "AnotherPass123!")
+        assert again.status_code == 409, again.text
+        assert "already has a password" in again.json()["detail"].lower()
+
+    def test_unknown_email_gets_a_helpful_error(self, auth_client, db_session):
+        response = self._activate(
+            auth_client, f"missing-{uuid.uuid4().hex[:8]}@college.edu"
+        )
+        assert response.status_code == 404, response.text
+        assert "no student record" in response.json()["detail"].lower()
+
+    def test_short_password_is_rejected(self, auth_client, db_session):
+        student = self._create_student(db_session)
+        response = self._activate(auth_client, student.email, "short")
+        assert response.status_code == 422, response.text
+
+    def test_existing_account_cannot_be_claimed(self, auth_client):
+        email = f"owner-{uuid.uuid4().hex[:8]}@college.edu"
+        registered = auth_client.post(
+            "/api/auth/register",
+            json={
+                "email": email,
+                "password": "Secret123!",
+                "name": "Existing Owner",
+                "role": "FACULTY",
+            },
+        )
+        assert registered.status_code == 200, registered.text
+
+        response = self._activate(auth_client, email)
+        assert response.status_code == 409, response.text
+        assert "already has a password" in response.json()["detail"].lower()
+
+    def test_sign_in_ignores_email_case(self, auth_client, db_session):
+        student = self._create_student(db_session)
+        assert self._activate(auth_client, student.email).status_code == 200
+
+        local, domain = student.email.split("@")
+        login = auth_client.post(
+            "/api/auth/login",
+            data={
+                "username": f"{local.upper()}@{domain.upper()}",
+                "password": self.STUDENT_PASSWORD,
+                "scope": "student",
+            },
+        )
+        assert login.status_code == 200, login.text
+
+    def test_activated_student_sees_own_record(self, auth_client, db_session):
+        student = self._create_student(db_session)
+        activated = self._activate(auth_client, student.email)
+        assert activated.status_code == 200, activated.text
+
+        headers = {
+            "Authorization": f"Bearer {activated.json()['access_token']}"
+        }
+        response = auth_client.get("/api/me/student", headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["student"]["student_id"] == student.student_id
+
+
 class TestStudentSelfAccess:
     """A student may read their own record and attendance, and nothing else."""
 

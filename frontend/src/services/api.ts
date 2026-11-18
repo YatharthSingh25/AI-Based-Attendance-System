@@ -120,6 +120,11 @@ export const authApi = {
     role?: string
   }) => api.post("/api/auth/register", userData),
 
+  // First-time password setup for a student whose class record the teacher
+  // created. Returns a token, so the student is signed in straight away.
+  activate: (email: string, password: string) =>
+    api.post("/api/auth/activate", { email, password }),
+
   getCurrentUser: () => {
     // This would typically verify the token with the backend
     // For now, return user from localStorage

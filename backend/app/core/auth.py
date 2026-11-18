@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models import User
 from app.schemas import UserCreate
@@ -139,23 +139,32 @@ class AuthService:
         return encoded_jwt
     
     def authenticate(self, email: str, password: str, db: Session) -> Optional[User]:
-        """Authenticate a user by email and password."""
-        from sqlalchemy.orm import Session as SQLSession
-        # Query user by email
-        stmt = select(User).where(User.email == email)
+        """Authenticate a user by email and password.
+
+        Email comparison ignores case so a student can type their address the
+        way they normally write it, however the teacher entered it.
+        """
+        normalized = (email or "").strip().lower()
+        if not normalized:
+            return None
+
+        stmt = select(User).where(func.lower(User.email) == normalized)
         user = db.scalar(stmt)
-        
+
         if not user:
             return None
-        
+
         if not self.verify_password(password, user.password_hash):
             return None
-        
+
         return user
 
     def get_by_email(self, email: str, db: Session) -> Optional[User]:
-        """Return the user with the given email, if one exists."""
-        return db.scalar(select(User).where(User.email == email))
+        """Return the user with the given email, if one exists (ignoring case)."""
+        normalized = (email or "").strip().lower()
+        if not normalized:
+            return None
+        return db.scalar(select(User).where(func.lower(User.email) == normalized))
 
     def create(self, user_create: UserCreate, db: Session, role: str = "STUDENT") -> User:
         """Create a user with a server-assigned role.

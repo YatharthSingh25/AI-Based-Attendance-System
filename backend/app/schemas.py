@@ -16,6 +16,12 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class StudentActivation(BaseModel):
+    """First-time password setup for a student the teacher registered."""
+
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=128)
+
 class UserResponse(BaseModel):
     id: str
     email: str

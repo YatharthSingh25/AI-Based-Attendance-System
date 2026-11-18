@@ -451,6 +451,30 @@ button {
   text-align: center;
 }
 
+.login-footnote p {
+  margin: 0 0 0.35rem;
+}
+
+.login-card .login-secondary {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  color: var(--primary-hover);
+}
+
 .form-error {
   margin: 0 0 0.75rem;
   padding: 0.55rem 0.7rem;

@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import datetime, timedelta
 import jwt
@@ -15,6 +16,7 @@ from app.schemas import (
     UserCreate,
     UserLogin,
     StudentCreate,
+    StudentActivation,
     AttendanceSessionCreate,
     MLPredictionResponse,
 )
@@ -210,6 +212,73 @@ async def register(
             "role": user.role,
             "name": user.name
         }
+    }
+
+
+@app.post("/api/auth/activate", response_model=dict)
+async def activate_student_account(
+    activation: StudentActivation,
+    db: Session = Depends(get_db)
+):
+    """Set a password for a student the teacher already registered.
+
+    Adding a student creates a class record, not a login: the teacher never
+    chooses the student's password. The first time a student signs in they
+    claim that record by choosing a password with the email the teacher used.
+    From then on the password is required, and this endpoint refuses to
+    overwrite an existing password.
+    """
+    email = (activation.email or "").strip().lower()
+
+    existing_user = auth_service.get_by_email(email, db)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This email already has a password. Sign in with it instead."
+            ),
+        )
+
+    student = db.query(Student).filter(func.lower(Student.email) == email).first()
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "No student record uses this email. Ask your teacher to add "
+                "you before setting a password."
+            ),
+        )
+
+    try:
+        user = auth_service.create(
+            UserCreate(
+                email=email,
+                password=activation.password,
+                name=student.name,
+            ),
+            db,
+            role="STUDENT",
+        )
+    except IntegrityError:
+        # Two claims for the same address at the same time: the unique email
+        # constraint rejects one of them.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email already has a password. Sign in with it instead.",
+        )
+
+    access_token = auth_service.create_access_token(data={"sub": str(user.id)})
+    return {
+        "message": "Password created. You are signed in.",
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "role": user.role,
+            "name": user.name,
+        },
     }
 
 
